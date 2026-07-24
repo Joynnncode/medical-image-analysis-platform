@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+models/
+*.nii
+*.nii.gz
+.pytest_cache/
