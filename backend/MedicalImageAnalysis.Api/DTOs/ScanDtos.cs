@@ -6,7 +6,9 @@ public record SegmentationResultDto(
     int VoxelCount,
     double VolumeMl,
     double InferenceTimeMs,
-    string ModelName
+    string ModelName,
+    string Organ,
+    string OrganDisplayName
 );
 
 public record ScanDetailDto(
@@ -16,3 +18,7 @@ public record ScanDetailDto(
     DateTime UploadedAt,
     SegmentationResultDto? Result
 );
+
+public record OrganOptionDto(string Key, string DisplayName);
+
+public record OrgansListDto(List<OrganOptionDto> Organs, string Default);

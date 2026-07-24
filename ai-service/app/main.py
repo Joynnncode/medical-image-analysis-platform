@@ -3,11 +3,13 @@ import logging
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.model import DEVICE, is_model_loaded, run_inference
-from app.schemas import HealthResponse, SegmentationResponse
+from app import model as spleen_model
+from app import wholebody_model
+from app.organs import DEFAULT_ORGAN, ORGANS
+from app.schemas import HealthResponse, OrganInfo, OrgansResponse, SegmentationResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-service")
@@ -25,22 +27,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ALLOWED_SUFFIXES = {".nii", ".gz"}
-
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(
-        status="ok", device=str(DEVICE), model_loaded=is_model_loaded()
+        status="ok",
+        device=str(spleen_model.DEVICE),
+        model_loaded=spleen_model.is_model_loaded() or wholebody_model.is_model_loaded(),
+    )
+
+
+@app.get("/organs", response_model=OrgansResponse)
+def organs() -> OrgansResponse:
+    return OrgansResponse(
+        organs=[
+            OrganInfo(key=key, display_name=spec.display_name)
+            for key, spec in ORGANS.items()
+        ],
+        default=DEFAULT_ORGAN,
     )
 
 
 @app.post("/segment", response_model=SegmentationResponse)
-async def segment(file: UploadFile) -> SegmentationResponse:
+async def segment(
+    file: UploadFile, organ: str = Form(default=DEFAULT_ORGAN)
+) -> SegmentationResponse:
     filename = file.filename or ""
     if not (filename.endswith(".nii") or filename.endswith(".nii.gz")):
         raise HTTPException(
             status_code=400, detail="Only .nii or .nii.gz files are supported"
+        )
+
+    spec = ORGANS.get(organ)
+    if spec is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown organ '{organ}'. Available: {', '.join(ORGANS)}",
         )
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -51,7 +73,12 @@ async def segment(file: UploadFile) -> SegmentationResponse:
         input_path.write_bytes(contents)
 
         try:
-            stats = run_inference(str(input_path), str(output_path))
+            if spec.engine == "spleen":
+                stats = spleen_model.run_inference(str(input_path), str(output_path))
+            else:
+                stats = wholebody_model.run_inference(
+                    str(input_path), str(output_path), spec.label_index
+                )
         except Exception:
             logger.exception("Segmentation failed")
             raise HTTPException(status_code=500, detail="Segmentation failed")
@@ -63,4 +90,7 @@ async def segment(file: UploadFile) -> SegmentationResponse:
         voxel_count=stats["voxel_count"],
         volume_ml=stats["volume_ml"],
         inference_time_ms=stats["inference_time_ms"],
+        model_name=spec.model_name,
+        organ=organ,
+        organ_display_name=spec.display_name,
     )

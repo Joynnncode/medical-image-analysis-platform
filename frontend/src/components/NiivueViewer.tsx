@@ -7,6 +7,15 @@ interface Props {
   hasMask: boolean;
 }
 
+interface VolumeOptions {
+  url: string;
+  colormap: string;
+  opacity: number;
+  name: string;
+  cal_min?: number;
+  cal_max?: number;
+}
+
 export function NiivueViewer({ scanId, hasMask }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +35,7 @@ export function NiivueViewer({ scanId, hasMask }: Props) {
         const imageUrl = URL.createObjectURL(imageResp.data);
         objectUrls.push(imageUrl);
 
-        const volumes = [
+        const volumes: VolumeOptions[] = [
           { url: imageUrl, colormap: "gray", opacity: 1, name: "scan.nii.gz" },
         ];
 

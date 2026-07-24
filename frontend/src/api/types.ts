@@ -18,8 +18,20 @@ export interface SegmentationResult {
   volumeMl: number;
   inferenceTimeMs: number;
   modelName: string;
+  organ: string;
+  organDisplayName: string;
 }
 
 export interface ScanDetail extends ScanSummary {
   result: SegmentationResult | null;
+}
+
+export interface OrganOption {
+  key: string;
+  displayName: string;
+}
+
+export interface OrgansList {
+  organs: OrganOption[];
+  default: string;
 }

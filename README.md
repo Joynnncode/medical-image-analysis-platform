@@ -24,18 +24,21 @@ React (Vite)  --->  ASP.NET Core API  --->  Python FastAPI AI service
 - **Backend** (`backend/MedicalImageAnalysis.Api/`): ASP.NET Core Web API.
   Owns users, JWT auth, scan/file storage, and orchestrates calls to the AI
   service. Persists metadata in PostgreSQL via EF Core.
-- **AI service** (`ai-service/`): Python + FastAPI. Runs a pretrained
-  [MONAI](https://monai.io/) 3D UNet (`spleen_ct_segmentation` from the
-  MONAI Model Zoo, trained on the Medical Segmentation Decathlon Task09_Spleen
-  dataset) to segment the spleen in a CT volume.
+- **AI service** (`ai-service/`): Python + FastAPI. Runs two pretrained
+  [MONAI](https://monai.io/) Model Zoo bundles depending on the chosen organ:
+  `spleen_ct_segmentation` (a dedicated 3D UNet, used for spleen) and
+  `wholeBody_ct_segmentation` (a SegResNet trained on 104 structures, used
+  for liver/kidneys/gallbladder/stomach/pancreas/bladder).
 
 ## Features
 
 - Register / log in (JWT-based auth)
 - Upload a CT scan in NIfTI format (`.nii` / `.nii.gz`)
-- Run spleen segmentation on a scan
+- Pick which organ to segment - spleen, liver, kidneys, gallbladder, stomach,
+  pancreas, or urinary bladder
 - View the scan and segmentation overlay in an interactive 3D viewer
-- See segmentation stats (voxel count, estimated volume in mL, inference time)
+- See segmentation stats (voxel count, estimated volume in mL, inference time,
+  which model ran)
 
 ## Deploying it live (free)
 

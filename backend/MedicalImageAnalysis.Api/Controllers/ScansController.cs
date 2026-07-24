@@ -121,7 +121,7 @@ public class ScansController : ControllerBase
     }
 
     [HttpPost("{id:guid}/segment")]
-    public async Task<ActionResult<ScanDetailDto>> Segment(Guid id)
+    public async Task<ActionResult<ScanDetailDto>> Segment(Guid id, [FromQuery] string organ = "spleen")
     {
         var scan = await _db.Scans
             .Include(s => s.SegmentationResult)
@@ -136,7 +136,7 @@ public class ScansController : ControllerBase
         try
         {
             var bytes = await System.IO.File.ReadAllBytesAsync(scan.StoredPath);
-            var outcome = await _aiServiceClient.SegmentAsync(bytes, scan.FileName);
+            var outcome = await _aiServiceClient.SegmentAsync(bytes, scan.FileName, organ);
 
             var scanDir = Path.Combine(StorageRoot, "scans", scan.Id.ToString());
             Directory.CreateDirectory(scanDir);
@@ -154,6 +154,8 @@ public class ScansController : ControllerBase
             scan.SegmentationResult.VolumeMl = outcome.VolumeMl;
             scan.SegmentationResult.InferenceTimeMs = outcome.InferenceTimeMs;
             scan.SegmentationResult.ModelName = outcome.ModelName;
+            scan.SegmentationResult.Organ = outcome.Organ;
+            scan.SegmentationResult.OrganDisplayName = outcome.OrganDisplayName;
             scan.SegmentationResult.CreatedAt = DateTime.UtcNow;
 
             scan.Status = ScanStatus.Completed;
@@ -178,7 +180,9 @@ public class ScansController : ControllerBase
                 scan.SegmentationResult.VoxelCount,
                 scan.SegmentationResult.VolumeMl,
                 scan.SegmentationResult.InferenceTimeMs,
-                scan.SegmentationResult.ModelName
+                scan.SegmentationResult.ModelName,
+                scan.SegmentationResult.Organ,
+                scan.SegmentationResult.OrganDisplayName
             );
 
         return new ScanDetailDto(scan.Id, scan.FileName, scan.Status.ToString(), scan.UploadedAt, resultDto);

@@ -22,6 +22,15 @@ Render hosts all four pieces:
 - The free Postgres database **expires after 90 days** and needs to be
   recreated (not upgraded automatically). See the last section for the
   2-minute fix when that happens.
+- The AI service now loads one of two models depending on which organ you
+  pick: a small dedicated model for spleen, or a larger multi-organ model
+  for everything else (liver, kidneys, gallbladder, stomach, pancreas,
+  bladder). Whichever ones get used stay cached in memory, so if you try
+  several different organs in one session, memory use adds up. Render's
+  free instance (512MB RAM) may not be enough for the multi-organ model -
+  if segmentation requests for non-spleen organs fail or the service
+  crashes, that's why; upgrade just that one service to a paid instance
+  with more RAM.
 
 You'll need to create one free account at [render.com](https://render.com)
 yourself (GitHub login works, no card required) and authorize it to access
