@@ -11,7 +11,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app .
 
-ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 
-ENTRYPOINT ["dotnet", "MedicalImageAnalysis.Api.dll"]
+# Render (and similar PaaS) inject a PORT env var and expect the app to
+# bind to it; docker-compose local dev doesn't set one, so this falls
+# back to 8080 to match the existing compose port mapping.
+ENTRYPOINT ["sh", "-c", "ASPNETCORE_URLS=http://+:${PORT:-8080} dotnet MedicalImageAnalysis.Api.dll"]

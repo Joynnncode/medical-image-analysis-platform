@@ -37,6 +37,12 @@ React (Vite)  --->  ASP.NET Core API  --->  Python FastAPI AI service
 - View the scan and segmentation overlay in an interactive 3D viewer
 - See segmentation stats (voxel count, estimated volume in mL, inference time)
 
+## Deploying it live (free)
+
+Want a real public URL instead of running it locally? See
+[DEPLOYMENT.md](DEPLOYMENT.md) for a $0/month setup using Vercel + Render +
+Neon.
+
 ## Running it
 
 ### Option A: Docker Compose (recommended)
