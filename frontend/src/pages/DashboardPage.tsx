@@ -69,7 +69,7 @@ export function DashboardPage() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".nii,.nii.gz"
+          accept=".nii,.nii.gz,.gz"
           onChange={handleFileChange}
           disabled={uploading}
           style={{ display: "none" }}

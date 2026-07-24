@@ -36,7 +36,19 @@ export function NiivueViewer({ scanId, hasMask }: Props) {
           });
           const maskUrl = URL.createObjectURL(maskResp.data);
           objectUrls.push(maskUrl);
-          volumes.push({ url: maskUrl, colormap: "red", opacity: 0.5, name: "mask.nii.gz" });
+          volumes.push({
+            url: maskUrl,
+            colormap: "red",
+            opacity: 0.6,
+            name: "mask.nii.gz",
+            // Mask values are 0 (background) or 1 (spleen). Without a
+            // threshold, Niivue tints every voxel including background,
+            // washing the whole image red. cal_min/cal_max clip anything
+            // below 1 to fully transparent so only the segmented region
+            // is colored.
+            cal_min: 1,
+            cal_max: 1,
+          });
         }
 
         if (cancelled || !canvasRef.current) return;
