@@ -40,8 +40,8 @@ React (Vite)  --->  ASP.NET Core API  --->  Python FastAPI AI service
 ## Deploying it live (free)
 
 Want a real public URL instead of running it locally? See
-[DEPLOYMENT.md](DEPLOYMENT.md) for a $0/month setup using Vercel + Render +
-Neon.
+[DEPLOYMENT.md](DEPLOYMENT.md) for a $0/month setup — everything hosted
+under a single Render account.
 
 ## Running it
 
