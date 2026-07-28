@@ -78,6 +78,10 @@ export function DashboardPage() {
         <label htmlFor="file-upload" className="btn btn-primary" style={{ cursor: "pointer" }}>
           {uploading ? "Uploading..." : "Choose file"}
         </label>
+        <p className="text-muted" style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>
+          Don't have one? <a href="/sample_scan.nii.gz" download>Download a sample scan</a> (a real,
+          cropped spleen CT) to try it out.
+        </p>
       </div>
 
       {error && <div className="form-error">{error}</div>}
