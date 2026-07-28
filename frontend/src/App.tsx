@@ -6,6 +6,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { ResearchPage } from "./pages/ResearchPage";
 import { ScanDetailPage } from "./pages/ScanDetailPage";
 
 function App() {
@@ -30,6 +31,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ScanDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/research/ich-segmentation"
+              element={
+                <ProtectedRoute>
+                  <ResearchPage />
                 </ProtectedRoute>
               }
             />

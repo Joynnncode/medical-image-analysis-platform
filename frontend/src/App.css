@@ -46,6 +46,17 @@
   font-size: 0.85rem;
 }
 
+.navbar-link {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.navbar-link:hover {
+  color: var(--text);
+}
+
 .page {
   flex: 1;
   width: 100%;
@@ -197,4 +208,85 @@
 
 .viewer-status-error {
   color: var(--danger);
+}
+
+.research-section {
+  margin-bottom: 2rem;
+}
+
+.research-section h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.research-section p {
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.research-steps {
+  color: var(--text-muted);
+  line-height: 1.7;
+  padding-left: 1.25rem;
+}
+
+.research-figure {
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin: 0.75rem 0;
+  display: block;
+}
+
+.research-image-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.research-image-row figure {
+  margin: 0;
+  flex: 1 1 240px;
+}
+
+.research-image-row figcaption {
+  font-size: 0.8rem;
+  text-align: center;
+  margin-top: 0.25rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 1rem;
+}
+
+.research-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.research-table th,
+.research-table td {
+  padding: 0.65rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.research-table th {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface-raised);
+}
+
+.research-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.research-table td:first-child {
+  font-weight: 600;
 }

@@ -19,6 +19,9 @@ export function NavBar() {
       <div className="navbar-links">
         {isAuthenticated ? (
           <>
+            <Link to="/research/ich-segmentation" className="navbar-link">
+              Research
+            </Link>
             <span className="navbar-email">{email}</span>
             <button className="btn" onClick={handleLogout}>
               Log out
