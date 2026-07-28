@@ -32,9 +32,16 @@ from monai.transforms import (
     Spacingd,
 )
 
+from app.preprocessing import safe_pixdim
+
 BUNDLE_NAME = "spleen_ct_segmentation"
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models"))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+DEFAULT_PIXDIM = (1.5, 1.5, 2.0)
+OUTPUT_CHANNELS = 2
+# Circuit breaker for pathologically large volumes; typical real scans stay under this untouched.
+MAX_RESAMPLED_VOXELS = 20_000_000
 
 _model = None
 _model_lock = Lock()
@@ -83,13 +90,13 @@ def get_model() -> UNet:
         return _model
 
 
-def _pre_transforms() -> Compose:
+def _pre_transforms(pixdim: tuple[float, float, float]) -> Compose:
     return Compose(
         [
             LoadImaged(keys="image", image_only=False),
             EnsureChannelFirstd(keys="image"),
             Orientationd(keys="image", axcodes="RAS"),
-            Spacingd(keys="image", pixdim=(1.5, 1.5, 2.0), mode="bilinear"),
+            Spacingd(keys="image", pixdim=pixdim, mode="bilinear"),
             ScaleIntensityRanged(
                 keys="image", a_min=-57, a_max=164, b_min=0.0, b_max=1.0, clip=True
             ),
@@ -105,7 +112,8 @@ def run_inference(input_path: str, output_path: str) -> dict:
     """
     start = time.time()
     net = get_model()
-    pre = _pre_transforms()
+    pixdim = safe_pixdim(input_path, DEFAULT_PIXDIM, MAX_RESAMPLED_VOXELS, OUTPUT_CHANNELS)
+    pre = _pre_transforms(pixdim)
 
     data = pre({"image": input_path})
     image = data["image"].unsqueeze(0).to(DEVICE)
@@ -114,7 +122,7 @@ def run_inference(input_path: str, output_path: str) -> dict:
         logits = sliding_window_inference(
             inputs=image,
             roi_size=(96, 96, 96),
-            sw_batch_size=4,
+            sw_batch_size=1,
             predictor=net,
             overlap=0.5,
         )
@@ -122,16 +130,17 @@ def run_inference(input_path: str, output_path: str) -> dict:
 
     data["pred"] = probs[0].cpu()
 
+    # Argmax before invert (not after) - avoids inverting a full-precision probability tensor.
     post = Compose(
         [
+            AsDiscreted(keys="pred", argmax=True),
             Invertd(
                 keys="pred",
                 transform=pre,
                 orig_keys="image",
-                nearest_interp=False,
+                nearest_interp=True,
                 to_tensor=True,
             ),
-            AsDiscreted(keys="pred", argmax=True),
         ]
     )
     data = post(data)
