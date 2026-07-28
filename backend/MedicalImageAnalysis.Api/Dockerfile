@@ -13,6 +13,12 @@ COPY --from=build /app .
 
 EXPOSE 8080
 
+# Config comes from env vars in production, not live-edited files, and
+# small/shared containers can have very low inotify watch limits - avoid
+# ASP.NET Core's default appsettings.json file-watcher hitting that limit
+# and crashing the app on startup.
+ENV DOTNET_hostBuilder__reloadConfigOnChange=false
+
 # Render (and similar PaaS) inject a PORT env var and expect the app to
 # bind to it; docker-compose local dev doesn't set one, so this falls
 # back to 8080 to match the existing compose port mapping.
