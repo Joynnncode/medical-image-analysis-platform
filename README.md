@@ -7,6 +7,12 @@ AI segmentation model on them, and viewing the results in the browser.
 > model is a research-grade demo (trained on a public academic dataset) and
 > is not validated for clinical use. Do not upload real patient data.
 
+**Live demo:** [medimg-fronted.onrender.com](https://medimg-fronted.onrender.com) —
+click "Try it as a guest" to skip registration, then use the "Download a
+sample scan" link on the dashboard if you don't have a `.nii.gz` file handy.
+Free-tier hosting, so the first request after a period of inactivity can
+take 30s–2min to wake up.
+
 ![Dashboard](docs/screenshots/dashboard.png)
 ![Scan detail with segmentation overlay](docs/screenshots/scan-detail.png)
 
@@ -32,19 +38,28 @@ React (Vite)  --->  ASP.NET Core API  --->  Python FastAPI AI service
 
 ## Features
 
-- Register / log in (JWT-based auth)
-- Upload a CT scan in NIfTI format (`.nii` / `.nii.gz`)
+- Register / log in (JWT-based auth), or click "Try it as a guest" for an
+  instant throwaway account - no form to fill in. Guest accounts (and their
+  scan files) are automatically deleted after 24 hours by a background
+  cleanup job, so they don't accumulate.
+- Upload a CT scan in NIfTI format (`.nii` / `.nii.gz`), or grab the bundled
+  sample scan (a real, cropped spleen CT) if you don't have one
 - Pick which organ to segment - spleen, liver, kidneys, gallbladder, stomach,
   pancreas, or urinary bladder
 - View the scan and segmentation overlay in an interactive 3D viewer
 - See segmentation stats (voxel count, estimated volume in mL, inference time,
   which model ran)
+- Browse a [research case-study page](frontend/src/pages/ResearchPage.tsx) on
+  intracranial haemorrhage segmentation - a portfolio write-up, not a live
+  model (see the page itself for why)
 
 ## Deploying it live (free)
 
 Want a real public URL instead of running it locally? See
-[DEPLOYMENT.md](DEPLOYMENT.md) for a $0/month setup — everything hosted
-under a single Render account.
+[DEPLOYMENT.md](DEPLOYMENT.md) for a $0/month setup on Render, with
+[Neon](https://neon.tech) for Postgres instead of Render's free database
+(which expires and needs recreating every 90 days) — this is exactly how
+the live demo above is hosted.
 
 ## Running it
 
@@ -149,14 +164,15 @@ Docker Compose (`.env`, copy from `.env.example`) both expose:
 
 ## Sample data
 
-`sample_scan.nii.gz` at the repo root is a small crop (around one spleen,
-generous margin) taken from case `spleen_15` in the [Medical Segmentation
-Decathlon](http://medicaldecathlon.com/) Task09_Spleen dataset - the same
-public dataset the `spleen_ct_segmentation` MONAI bundle was trained on.
-It's cropped down in physical size (not just resolution) specifically so
-segmentation completes reliably within a free-tier host's memory limits,
-while still being real anatomy rather than synthetic/placeholder data.
-Medical Segmentation Decathlon data is licensed
+`sample_scan.nii.gz` (repo root, and served from the frontend at
+`/sample_scan.nii.gz` via the dashboard's "Download a sample scan" link) is
+a small crop (around one spleen, generous margin) taken from case
+`spleen_15` in the [Medical Segmentation Decathlon](http://medicaldecathlon.com/)
+Task09_Spleen dataset - the same public dataset the `spleen_ct_segmentation`
+MONAI bundle was trained on. It's cropped down in physical size (not just
+resolution) specifically so segmentation completes reliably within a
+free-tier host's memory limits, while still being real anatomy rather than
+synthetic/placeholder data. Medical Segmentation Decathlon data is licensed
 [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## License
