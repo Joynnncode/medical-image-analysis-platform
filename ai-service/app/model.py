@@ -25,14 +25,13 @@ from monai.transforms import (
     Compose,
     EnsureChannelFirstd,
     EnsureTyped,
-    Invertd,
     LoadImaged,
     Orientationd,
     ScaleIntensityRanged,
     Spacingd,
 )
 
-from app.preprocessing import safe_pixdim
+from app.preprocessing import remap_mask_to_original, safe_pixdim
 
 BUNDLE_NAME = "spleen_ct_segmentation"
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models"))
@@ -129,24 +128,14 @@ def run_inference(input_path: str, output_path: str) -> dict:
         probs = torch.softmax(logits, dim=1)
 
     data["pred"] = probs[0].cpu()
-
-    # Argmax before invert (not after) - avoids inverting a full-precision probability tensor.
-    post = Compose(
-        [
-            AsDiscreted(keys="pred", argmax=True),
-            Invertd(
-                keys="pred",
-                transform=pre,
-                orig_keys="image",
-                nearest_interp=True,
-                to_tensor=True,
-            ),
-        ]
-    )
-    data = post(data)
-    mask = np.asarray(data["pred"][0]).astype(np.uint8)
+    data = Compose([AsDiscreted(keys="pred", argmax=True)])(data)
+    mask_resampled = np.asarray(data["pred"][0]).astype(np.uint8)
+    mask_affine = np.asarray(data["pred"].affine, dtype=np.float64)
 
     original = nib.load(input_path)
+    mask = remap_mask_to_original(
+        mask_resampled, mask_affine, original.affine, original.shape[:3]
+    )
     nib.save(nib.Nifti1Image(mask, original.affine, original.header), output_path)
 
     voxel_volume_mm3 = float(abs(np.linalg.det(original.affine[:3, :3])))

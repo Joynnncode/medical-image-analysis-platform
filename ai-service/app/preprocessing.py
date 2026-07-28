@@ -9,6 +9,32 @@ resampled tensor size.
 """
 
 import nibabel as nib
+import numpy as np
+from scipy.ndimage import affine_transform
+
+
+def remap_mask_to_original(
+    mask: np.ndarray,
+    mask_affine: np.ndarray,
+    orig_affine: np.ndarray,
+    orig_shape: tuple[int, int, int],
+) -> np.ndarray:
+    """Nearest-neighbor resample a discrete mask from the model's (reoriented,
+    resampled) grid back onto the original image's voxel grid, using the two
+    affines directly instead of MONAI's Invertd - which keeps invertible-
+    transform bookkeeping alive for the whole forward pass and is the
+    dominant memory cost on a large volume.
+    """
+    voxel_to_voxel = np.linalg.inv(mask_affine) @ orig_affine
+    return affine_transform(
+        mask,
+        matrix=voxel_to_voxel[:3, :3],
+        offset=voxel_to_voxel[:3, 3],
+        output_shape=orig_shape,
+        order=0,
+        mode="constant",
+        cval=0,
+    ).astype(np.uint8)
 
 
 def safe_pixdim(

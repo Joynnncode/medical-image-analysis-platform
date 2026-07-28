@@ -5,3 +5,4 @@ monai==1.4.0
 nibabel==5.3.2
 numpy==1.26.4
 requests==2.32.3
+scipy==1.13.1
