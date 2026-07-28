@@ -147,6 +147,18 @@ Docker Compose (`.env`, copy from `.env.example`) both expose:
 - No rate limiting, audit logging, or HIPAA/PHI safeguards are implemented —
   this is not suitable for real patient data.
 
+## Sample data
+
+`sample_scan.nii.gz` at the repo root is a small crop (around one spleen,
+generous margin) taken from case `spleen_15` in the [Medical Segmentation
+Decathlon](http://medicaldecathlon.com/) Task09_Spleen dataset - the same
+public dataset the `spleen_ct_segmentation` MONAI bundle was trained on.
+It's cropped down in physical size (not just resolution) specifically so
+segmentation completes reliably within a free-tier host's memory limits,
+while still being real anatomy rather than synthetic/placeholder data.
+Medical Segmentation Decathlon data is licensed
+[CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
 ## License
 
 MIT
