@@ -4,12 +4,13 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, guestLogin } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -25,6 +26,19 @@ export function LoginPage() {
       setError(message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleGuest = async () => {
+    setError(null);
+    setGuestLoading(true);
+    try {
+      await guestLogin();
+      navigate("/");
+    } catch {
+      setError("Couldn't start a guest session. Please try again.");
+    } finally {
+      setGuestLoading(false);
     }
   };
 
@@ -60,6 +74,15 @@ export function LoginPage() {
             {submitting ? "Logging in..." : "Log in"}
           </button>
         </form>
+        <button
+          className="btn"
+          type="button"
+          onClick={handleGuest}
+          disabled={guestLoading}
+          style={{ width: "100%", marginTop: "0.75rem" }}
+        >
+          {guestLoading ? "Starting guest session..." : "Try it as a guest"}
+        </button>
         <p className="text-muted" style={{ marginTop: "1rem", fontSize: "0.9rem" }}>
           No account? <Link to="/register">Register</Link>
         </p>

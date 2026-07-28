@@ -33,6 +33,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddHostedService<GuestCleanupService>();
 
 builder.Services.AddHttpClient<IAiServiceClient, AiServiceClient>(client =>
 {

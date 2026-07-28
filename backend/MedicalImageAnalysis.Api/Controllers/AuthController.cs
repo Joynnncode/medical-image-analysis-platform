@@ -45,6 +45,19 @@ public class AuthController : ControllerBase
         return Ok(new AuthResponse(token, user.Email, expiresAt));
     }
 
+    [HttpPost("guest")]
+    public async Task<ActionResult<AuthResponse>> Guest()
+    {
+        var user = new User { Email = $"guest-{Guid.NewGuid():N}@guest.local", IsGuest = true };
+        user.PasswordHash = _passwordHasher.HashPassword(user, Guid.NewGuid().ToString());
+
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        var (token, expiresAt) = _tokenService.CreateToken(user);
+        return Ok(new AuthResponse(token, "Guest", expiresAt));
+    }
+
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {

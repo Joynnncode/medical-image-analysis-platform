@@ -7,6 +7,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
+  guestLogin: () => Promise<void>;
   logout: () => void;
 }
 
@@ -37,6 +38,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     persistSession(data);
   };
 
+  const guestLogin = async () => {
+    const { data } = await apiClient.post<AuthResponse>("/auth/guest");
+    persistSession(data);
+  };
+
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("email");
@@ -44,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo(
-    () => ({ email, isAuthenticated: email !== null, login, register, logout }),
+    () => ({ email, isAuthenticated: email !== null, login, register, guestLogin, logout }),
     [email]
   );
 
