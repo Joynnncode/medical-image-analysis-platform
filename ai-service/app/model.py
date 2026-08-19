@@ -32,12 +32,15 @@ from monai.transforms import (
 )
 
 from app.preprocessing import remap_mask_to_original, safe_pixdim
+from app.progress import NULL_PROGRESS, Progress
 
 BUNDLE_NAME = "spleen_ct_segmentation"
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models"))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 DEFAULT_PIXDIM = (1.5, 1.5, 2.0)
+ROI_SIZE = (96, 96, 96)
+SW_OVERLAP = 0.5
 OUTPUT_CHANNELS = 2
 # Circuit breaker for pathologically large volumes; typical real scans stay under this untouched.
 MAX_RESAMPLED_VOXELS = 20_000_000
@@ -48,10 +51,6 @@ _model_lock = Lock()
 
 def _weights_path() -> Path:
     return MODEL_DIR / BUNDLE_NAME / "models" / "model.pt"
-
-
-def is_model_loaded() -> bool:
-    return _model is not None
 
 
 def get_model() -> UNet:
@@ -104,29 +103,40 @@ def _pre_transforms(pixdim: tuple[float, float, float]) -> Compose:
     )
 
 
-def run_inference(input_path: str, output_path: str) -> dict:
+def run_inference(
+    input_path: str, output_path: str, progress: Progress = NULL_PROGRESS
+) -> dict:
     """Run spleen segmentation on a NIfTI file and write a mask NIfTI file
     co-registered with the *original* input volume (same shape/affine),
     so the frontend can overlay it voxel-for-voxel without extra resampling.
+
+    `progress` is notified as each stage begins, and per sliding-window
+    patch during inference, so a queued job can report where it has got to.
     """
     start = time.time()
+    progress.stage("loading_model" if _weights_path().exists() else "downloading_weights")
     net = get_model()
+
+    progress.stage("preprocessing")
     pixdim = safe_pixdim(input_path, DEFAULT_PIXDIM, MAX_RESAMPLED_VOXELS, OUTPUT_CHANNELS)
     pre = _pre_transforms(pixdim)
 
     data = pre({"image": input_path})
     image = data["image"].unsqueeze(0).to(DEVICE)
 
+    progress.stage("inference")
+    predictor = progress.wrap_predictor(net, tuple(image.shape[2:]), ROI_SIZE, SW_OVERLAP)
     with torch.no_grad():
         logits = sliding_window_inference(
             inputs=image,
-            roi_size=(96, 96, 96),
+            roi_size=ROI_SIZE,
             sw_batch_size=1,
-            predictor=net,
-            overlap=0.5,
+            predictor=predictor,
+            overlap=SW_OVERLAP,
         )
         probs = torch.softmax(logits, dim=1)
 
+    progress.stage("postprocessing")
     data["pred"] = probs[0].cpu()
     data = Compose([AsDiscreted(keys="pred", argmax=True)])(data)
     mask_resampled = np.asarray(data["pred"][0]).astype(np.uint8)
@@ -136,6 +146,7 @@ def run_inference(input_path: str, output_path: str) -> dict:
     mask = remap_mask_to_original(
         mask_resampled, mask_affine, original.affine, original.shape[:3]
     )
+    progress.stage("writing_mask")
     nib.save(nib.Nifti1Image(mask, original.affine, original.header), output_path)
 
     voxel_volume_mm3 = float(abs(np.linalg.det(original.affine[:3, :3])))

@@ -34,12 +34,17 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddHostedService<GuestCleanupService>();
+// Drives queued segmentation jobs to completion independently of any client.
+builder.Services.AddHostedService<SegmentationJobMonitor>();
 
 builder.Services.AddHttpClient<IAiServiceClient, AiServiceClient>(client =>
 {
     var baseUrl = builder.Configuration["AiService:BaseUrl"] ?? "http://localhost:8001";
     client.BaseAddress = new Uri(baseUrl);
-    client.Timeout = TimeSpan.FromMinutes(5);
+    // Every call to the AI service is now short: enqueue a job, read its
+    // status, fetch a finished mask. The old five-minute timeout existed
+    // only because inference itself happened inside the request.
+    client.Timeout = TimeSpan.FromMinutes(2);
 });
 
 var jwtKey = builder.Configuration["Jwt:Key"]

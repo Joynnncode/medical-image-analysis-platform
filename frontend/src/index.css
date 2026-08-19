@@ -152,3 +152,87 @@ h1, h2, h3 {
   background: rgba(248, 113, 113, 0.15);
   color: var(--danger);
 }
+
+.badge-queued {
+  background: rgba(34, 211, 238, 0.15);
+  color: var(--accent);
+}
+
+.job-progress {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.job-progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.job-progress-percent {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  transition: width 0.4s ease;
+}
+
+/* Queued work has no percentage to show yet, so the bar animates instead of
+   sitting at a misleading 0%. */
+.progress-bar.is-indeterminate {
+  width: 35% !important;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.job-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.btn-link:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.scan-row-progress {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: 0.6rem;
+}
