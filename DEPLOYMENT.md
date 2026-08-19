@@ -72,12 +72,28 @@ your behalf. Everything else below is copy/paste once you're signed in.
 
 ## 2. Job queue (Key Value)
 
-- New + → Key Value
-- Name: anything (e.g. `medimg-queue`), Plan: **Free**
-- Maxmemory policy: `noeviction` if offered — jobs shouldn't be evicted
-  while they're waiting to run
-- Create it, then copy the **Internal Key Value URL** (starts with
-  `redis://...`). Save it for step 3.
+Note "Key Value", not "Project" — a Project is just a folder for grouping
+services. New instances run Valkey (a Redis fork), which the AI service's
+Redis client and RQ treat as a drop-in replacement.
+
+- New + → Key Value (direct link: `dashboard.render.com/new/redis`)
+- Name: anything (e.g. `medimg-queue`)
+- **Region: the same one you pick for the AI service in step 3.** The free
+  internal connection only works between services in the same region.
+- Maxmemory Policy: **`noeviction`**. The default LRU policies are meant for
+  caches and will happily evict jobs that are still waiting to run.
+- Instance Type: **Free**
+- Create Key Value, then open it and use **Connect** (top right) to copy the
+  **Internal Key Value URL** (starts with `redis://...`). Save it for step 3.
+
+Free tier caveats, none of them blocking for a demo:
+
+- One free Key Value instance per workspace.
+- No persistence, and Render may restart the instance at any time — queued
+  and in-flight jobs are lost when that happens. The API notices the job has
+  vanished and marks that scan as failed rather than waiting forever, so
+  re-running the segmentation is all that's needed.
+- Unlike the free Postgres database, it does not expire.
 
 ## 3. AI service
 
