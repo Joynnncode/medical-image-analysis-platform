@@ -40,7 +40,7 @@ export function ScanDetailPage() {
     if (!id) return;
     const { data } = await apiClient.get<ScanDetail>(`/scans/${id}`);
     setScan(data);
-    setJob(data.job);
+    setJob(data.job ?? null);
     // A job that failed before this page was even opened should still say so.
     if (data.job && (data.job.status === "Failed" || data.job.status === "DeadLettered")) {
       setError(failureMessage(data.job));
@@ -102,7 +102,7 @@ export function ScanDetailPage() {
         `/scans/${id}/segment?organ=${selectedOrgan}`
       );
       setScan(data);
-      setJob(data.job);
+      setJob(data.job ?? null);
     } catch (err) {
       console.error(err);
       setError(enqueueError(err));
