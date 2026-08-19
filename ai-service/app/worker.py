@@ -26,12 +26,13 @@ from rq.job import Job
 from app import jobstore
 from app.queueing import (
     DLQ_INDEX_KEY,
-    REDIS_URL,
+    REDIS_URL_IS_DEFAULT,
     QUEUE_NAME,
     dead_letter,
     get_queue,
     get_redis,
     is_dead_lettered,
+    safe_redis_url,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -172,7 +173,7 @@ def wait_for_redis() -> None:
         except (RedisError, OSError) as exc:
             logger.warning(
                 "Redis at %s is not reachable (%s); retrying in %ds",
-                REDIS_URL, exc, delay,
+                safe_redis_url(), exc, delay,
             )
             time.sleep(delay)
             delay = min(delay * 2, 30)
@@ -180,6 +181,18 @@ def wait_for_redis() -> None:
 
 def main() -> None:
     jobstore.JOB_DIR.mkdir(parents=True, exist_ok=True)
+
+    if REDIS_URL_IS_DEFAULT:
+        # Inside a container there is nothing on localhost, so this is almost
+        # always a missing environment variable rather than a real intent.
+        logger.warning(
+            "REDIS_URL is not set; falling back to %s. If this is a container, "
+            "the queue will not work until REDIS_URL points at your Redis.",
+            safe_redis_url(),
+        )
+    else:
+        logger.info("Using Redis at %s", safe_redis_url())
+
     wait_for_redis()
 
     # Daemon thread: it goes away with the process, and RQ installs its own
