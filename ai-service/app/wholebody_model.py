@@ -124,7 +124,7 @@ def run_inference(
 
     progress.stage("inference")
     predictor = progress.wrap_predictor(net, tuple(image.shape[2:]), ROI_SIZE, SW_OVERLAP)
-    with torch.no_grad():
+    with torch.inference_mode():
         logits = sliding_window_inference(
             inputs=image,
             roi_size=ROI_SIZE,
@@ -134,10 +134,13 @@ def run_inference(
             mode="gaussian",
             padding_mode="replicate",
         )
-        probs = torch.softmax(logits, dim=1)
 
     progress.stage("postprocessing")
-    data["pred"] = probs[0].cpu()
+    # No softmax: monotonic per voxel, so the argmax in the post transforms
+    # below is unchanged, and this avoids a second copy of a 105-channel
+    # volume - the largest single allocation in this pipeline.
+    data["pred"] = logits[0].cpu()
+    del logits
 
     # Match the bundle's own postprocessing order: argmax to a discrete
     # label map *before* inverting back to original spacing/orientation,
