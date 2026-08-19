@@ -5,6 +5,9 @@ import { apiClient } from "../api/client";
 interface Props {
   scanId: string;
   hasMask: boolean;
+  /** Changes whenever a new mask is produced, so re-segmenting the same
+      scan (a different organ, or a second run) reloads the overlay. */
+  maskVersion?: string;
 }
 
 interface VolumeOptions {
@@ -16,7 +19,7 @@ interface VolumeOptions {
   cal_max?: number;
 }
 
-export function NiivueViewer({ scanId, hasMask }: Props) {
+export function NiivueViewer({ scanId, hasMask, maskVersion }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +82,7 @@ export function NiivueViewer({ scanId, hasMask }: Props) {
       cancelled = true;
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [scanId, hasMask]);
+  }, [scanId, hasMask, maskVersion]);
 
   return (
     <div className="viewer">

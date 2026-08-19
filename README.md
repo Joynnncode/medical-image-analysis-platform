@@ -19,22 +19,50 @@ take 30s–2min to wake up.
 ## Architecture
 
 ```
-React (Vite)  --->  ASP.NET Core API  --->  Python FastAPI AI service
-   :5173             :5283 / :8080              :8001
-                          |
-                     PostgreSQL
+React (Vite)  --->  ASP.NET Core API  --->  AI service API  --->  Redis queue
+   :5173             :5283 / :8080             :8001                 :6379
+                          |                                            |
+                     PostgreSQL                                   AI workers
+                                                              (MONAI inference)
 ```
 
 - **Frontend** (`frontend/`): React + TypeScript + Vite. Handles auth,
   scan upload, and volume visualization via [Niivue](https://niivue.github.io/niivue/).
 - **Backend** (`backend/MedicalImageAnalysis.Api/`): ASP.NET Core Web API.
-  Owns users, JWT auth, scan/file storage, and orchestrates calls to the AI
-  service. Persists metadata in PostgreSQL via EF Core.
-- **AI service** (`ai-service/`): Python + FastAPI. Runs two pretrained
-  [MONAI](https://monai.io/) Model Zoo bundles depending on the chosen organ:
-  `spleen_ct_segmentation` (a dedicated 3D UNet, used for spleen) and
-  `wholeBody_ct_segmentation` (a SegResNet trained on 104 structures, used
-  for liver/kidneys/gallbladder/stomach/pancreas/bladder).
+  Owns users, JWT auth, scan/file storage, and the lifecycle of segmentation
+  jobs. Persists metadata in PostgreSQL via EF Core.
+- **AI service** (`ai-service/`): Python + FastAPI + [RQ](https://python-rq.org/).
+  The HTTP process only queues work; separate worker processes run two
+  pretrained [MONAI](https://monai.io/) Model Zoo bundles depending on the
+  chosen organ: `spleen_ct_segmentation` (a dedicated 3D UNet, used for
+  spleen) and `wholeBody_ct_segmentation` (a SegResNet trained on 104
+  structures, used for liver/kidneys/gallbladder/stomach/pancreas/bladder).
+
+### How segmentation runs
+
+CPU inference takes minutes, so it is a background job rather than an HTTP
+request:
+
+1. The browser asks the API to segment a scan. The API uploads the volume to
+   the AI service, which puts it on a Redis queue and answers `202` with a
+   job id. Nothing waits on the model.
+2. A worker picks the job up and reports its progress - stage plus a real
+   percentage, counted from the sliding-window patches MONAI actually
+   visits - back through Redis.
+3. A background service in the API follows the job to completion, collects
+   the finished mask and writes the result. **This does not depend on the
+   browser staying open**: close the tab, refresh, or restart the API, and
+   the run still finishes and shows up on the scan.
+4. A failed job is retried with a backoff. One that fails every attempt goes
+   to a **dead letter queue** with its traceback and its input volume kept
+   for replay, instead of disappearing into the logs.
+
+The queue is bounded (`MAX_QUEUE_DEPTH`, default 50): past that, new jobs are
+refused with `503` and a `Retry-After` rather than piling up. Concurrency is
+the number of workers - `docker compose up --scale ai-worker=3`.
+
+See [ai-service/README.md](ai-service/README.md) for the job endpoints, the
+dead letter queue tooling, and the full set of tuning knobs.
 
 ## Features
 
@@ -81,8 +109,8 @@ Then open:
 - AI service (docs): http://localhost:8001/docs
 
 The AI service downloads its pretrained weights (~tens of MB) automatically
-on the first segmentation request, so the first run of `/segment` will be
-slower than subsequent ones.
+on the first segmentation job, so the first run will be slower than
+subsequent ones.
 
 ### Option B: Run everything locally without Docker
 
@@ -100,7 +128,14 @@ Useful if Docker isn't set up yet, or for active development.
    psql -d postgres -c "CREATE DATABASE medimg OWNER medimg;"
    ```
 
-2. **AI service**
+2. **Redis** (the segmentation queue)
+
+   ```bash
+   brew install redis && brew services start redis
+   # or: docker run -p 6379:6379 redis:7-alpine
+   ```
+
+3. **AI service** - two processes: the HTTP API, and at least one worker.
 
    ```bash
    cd ai-service
@@ -108,10 +143,16 @@ Useful if Docker isn't set up yet, or for active development.
    source .venv/bin/activate
    pip install torch --index-url https://download.pytorch.org/whl/cpu
    pip install -r requirements.txt
-   uvicorn app.main:app --reload --port 8001
+
+   export REDIS_URL=redis://localhost:6379/0
+   export JOB_DIR=$(pwd)/.jobs
+   export MODEL_DIR=$(pwd)/models
+
+   uvicorn app.main:app --reload --port 8001   # terminal 1
+   python -m app.worker                        # terminal 2
    ```
 
-3. **Backend API**
+4. **Backend API**
 
    ```bash
    cd backend/MedicalImageAnalysis.Api
@@ -121,7 +162,7 @@ Useful if Docker isn't set up yet, or for active development.
    This applies EF Core migrations automatically on startup and listens on
    `http://localhost:5283`.
 
-4. **Frontend**
+5. **Frontend**
 
    ```bash
    cd frontend
@@ -137,8 +178,8 @@ Useful if Docker isn't set up yet, or for active development.
 frontend/               React + Vite + TypeScript SPA
 backend/
   MedicalImageAnalysis.Api/   ASP.NET Core Web API (auth, scans, storage)
-ai-service/             FastAPI + MONAI segmentation service
-docker-compose.yml      Wires all services + Postgres together
+ai-service/             FastAPI job API + RQ workers running MONAI models
+docker-compose.yml      Wires all services + Postgres + Redis together
 ```
 
 ## Configuration
@@ -152,6 +193,8 @@ Docker Compose (`.env`, copy from `.env.example`) both expose:
 | `Jwt:Key` | Secret used to sign JWTs — **change this** for anything beyond local testing |
 | `AiService:BaseUrl` | Where the API reaches the AI service |
 | `Storage:Root` | Where uploaded scans / masks are stored on disk |
+| `SegmentationJobs:PollIntervalSeconds` | How often the API checks in-flight segmentation jobs |
+| `MAX_QUEUE_DEPTH` / `JOB_MAX_ATTEMPTS` / `JOB_RETRY_INTERVALS` | Queue ceiling and retry policy (AI service; see `.env.example`) |
 
 ## Security / scope notes
 
@@ -160,7 +203,12 @@ Docker Compose (`.env`, copy from `.env.example`) both expose:
   before exposing this anywhere beyond your own machine.
 - File storage is local disk, not encrypted at rest.
 - No rate limiting, audit logging, or HIPAA/PHI safeguards are implemented —
-  this is not suitable for real patient data.
+  this is not suitable for real patient data. The segmentation queue is
+  bounded, which caps the work a caller can create, but it is not a
+  substitute for per-user rate limiting.
+- The AI service's job and dead letter queue endpoints are unauthenticated
+  and meant to live on an internal network, reachable only through the .NET
+  API. Don't expose port 8001 publicly.
 
 ## Sample data
 

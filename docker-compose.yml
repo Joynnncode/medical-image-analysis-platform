@@ -16,13 +16,70 @@ services:
       timeout: 5s
       retries: 10
 
+  # Broker for the segmentation job queue, and the store for job state,
+  # progress and the dead letter queue.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # HTTP front end of the AI service: accepts uploads, queues jobs, reports
+  # progress. Never runs a model itself.
   ai-service:
     build: ./ai-service
     restart: unless-stopped
+    command: ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      JOB_DIR: /app/jobs
+      MAX_QUEUE_DEPTH: ${MAX_QUEUE_DEPTH:-50}
+      JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
     volumes:
       - ai-models:/app/models
+      - ai-jobs:/app/jobs
     ports:
       - "8001:8001"
+
+  # Where inference actually happens. Scale it with
+  # `docker compose up --scale ai-worker=3` - each replica pulls one job at
+  # a time, so this is the concurrency dial.
+  ai-worker:
+    build: ./ai-service
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      JOB_DIR: /app/jobs
+      MODEL_DIR: /app/models
+      JOB_TIMEOUT_SECONDS: ${JOB_TIMEOUT_SECONDS:-1800}
+      JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
+      JOB_RETRY_INTERVALS: ${JOB_RETRY_INTERVALS:-10,30}
+    volumes:
+      # Same two volumes as ai-service: weights are shared, and the worker
+      # reads the input the API wrote and writes the mask back for it.
+      - ai-models:/app/models
+      - ai-jobs:/app/jobs
+    # The image's own healthcheck curls the HTTP port, which this container
+    # doesn't serve - ask RQ whether this worker's heartbeat is live instead.
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker", "--health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
   api:
     build: ./backend/MedicalImageAnalysis.Api
@@ -58,5 +115,7 @@ services:
 
 volumes:
   db-data:
+  redis-data:
   ai-models:
+  ai-jobs:
   api-storage:

@@ -36,11 +36,15 @@ from monai.transforms import (
     Spacingd,
 )
 
+from app.progress import NULL_PROGRESS, Progress
+
 BUNDLE_NAME = "wholeBody_ct_segmentation"
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models"))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 PIXDIM = (3.0, 3.0, 3.0)
+ROI_SIZE = (96, 96, 96)
+SW_OVERLAP = 0.25
 WEIGHTS_FILE = "model_lowres.pt"
 NUM_LABELS = 105
 
@@ -50,10 +54,6 @@ _model_lock = Lock()
 
 def _weights_path() -> Path:
     return MODEL_DIR / BUNDLE_NAME / "models" / WEIGHTS_FILE
-
-
-def is_model_loaded() -> bool:
-    return _model is not None
 
 
 def get_model() -> SegResNet:
@@ -100,29 +100,43 @@ def _pre_transforms() -> Compose:
     )
 
 
-def run_inference(input_path: str, output_path: str, label_index: int) -> dict:
+def run_inference(
+    input_path: str,
+    output_path: str,
+    label_index: int,
+    progress: Progress = NULL_PROGRESS,
+) -> dict:
     """Segment the full body, keep only `label_index`, and write a binary
     mask NIfTI co-registered with the original input volume.
+
+    `progress` is notified as each stage begins, and per sliding-window
+    patch during inference, so a queued job can report where it has got to.
     """
     start = time.time()
+    progress.stage("loading_model" if _weights_path().exists() else "downloading_weights")
     net = get_model()
+
+    progress.stage("preprocessing")
     pre = _pre_transforms()
 
     data = pre({"image": input_path})
     image = data["image"].unsqueeze(0).to(DEVICE)
 
+    progress.stage("inference")
+    predictor = progress.wrap_predictor(net, tuple(image.shape[2:]), ROI_SIZE, SW_OVERLAP)
     with torch.no_grad():
         logits = sliding_window_inference(
             inputs=image,
-            roi_size=(96, 96, 96),
+            roi_size=ROI_SIZE,
             sw_batch_size=1,
-            predictor=net,
-            overlap=0.25,
+            predictor=predictor,
+            overlap=SW_OVERLAP,
             mode="gaussian",
             padding_mode="replicate",
         )
         probs = torch.softmax(logits, dim=1)
 
+    progress.stage("postprocessing")
     data["pred"] = probs[0].cpu()
 
     # Match the bundle's own postprocessing order: argmax to a discrete
@@ -147,6 +161,7 @@ def run_inference(input_path: str, output_path: str, label_index: int) -> dict:
     mask = (labels == label_index).astype(np.uint8)
 
     original = nib.load(input_path)
+    progress.stage("writing_mask")
     nib.save(nib.Nifti1Image(mask, original.affine, original.header), output_path)
 
     voxel_volume_mm3 = float(abs(np.linalg.det(original.affine[:3, :3])))

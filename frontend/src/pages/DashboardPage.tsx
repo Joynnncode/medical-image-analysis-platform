@@ -3,8 +3,14 @@ import { Link } from "react-router-dom";
 import { apiClient } from "../api/client";
 import type { ScanSummary } from "../api/types";
 
+const REFRESH_INTERVAL_MS = 4000;
+
 function statusBadgeClass(status: string) {
   return `badge badge-${status.toLowerCase()}`;
+}
+
+function isInFlight(scan: ScanSummary) {
+  return scan.status === "Queued" || scan.status === "Processing";
 }
 
 export function DashboardPage() {
@@ -14,22 +20,30 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchScans = async () => {
-    setLoading(true);
+  const fetchScans = async (background = false) => {
+    if (!background) setLoading(true);
     try {
       const { data } = await apiClient.get<ScanSummary[]>("/scans");
       setScans(data);
     } catch (err) {
       console.error(err);
-      setError("Failed to load scans.");
+      if (!background) setError("Failed to load scans.");
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchScans();
   }, []);
+
+  // Segmentation runs in the background now, so the list refreshes itself
+  // while anything is still in flight.
+  useEffect(() => {
+    if (!scans.some(isInFlight)) return;
+    const timer = setTimeout(() => fetchScans(true), REFRESH_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [scans]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -100,7 +114,12 @@ export function DashboardPage() {
                   {new Date(scan.uploadedAt).toLocaleString()}
                 </span>
               </div>
-              <span className={statusBadgeClass(scan.status)}>{scan.status}</span>
+              <span>
+                <span className={statusBadgeClass(scan.status)}>{scan.status}</span>
+                {scan.status === "Processing" && scan.progress !== null && (
+                  <span className="scan-row-progress">{scan.progress}%</span>
+                )}
+              </span>
             </Link>
           ))}
         </div>
