@@ -59,8 +59,11 @@ export const ACTIVE_JOB_STATUSES: ReadonlySet<SegmentationJobStatus> = new Set([
   "Running",
 ]);
 
-export function isJobActive(job: SegmentationJob | null): boolean {
-  return job !== null && ACTIVE_JOB_STATUSES.has(job.status);
+export function isJobActive(job: SegmentationJob | null | undefined): boolean {
+  // Truthiness, not a null check: an API that omits `job` entirely - an older
+  // build, a rolled-back deploy - hands this `undefined`, and reading .status
+  // off that takes the whole page down.
+  return !!job && ACTIVE_JOB_STATUSES.has(job.status);
 }
 
 export interface ScanDetail extends ScanBase {
