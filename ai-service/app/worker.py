@@ -19,12 +19,14 @@ import time
 import traceback
 from typing import Any
 
+from redis.exceptions import RedisError
 from rq import Worker
 from rq.job import Job
 
 from app import jobstore
 from app.queueing import (
     DLQ_INDEX_KEY,
+    REDIS_URL,
     QUEUE_NAME,
     dead_letter,
     get_queue,
@@ -149,8 +151,36 @@ def healthcheck() -> int:
         return 1
 
 
+def wait_for_redis() -> None:
+    """Block until Redis answers, however long that takes.
+
+    RQ's Worker() constructor connects eagerly, so an unreachable broker
+    used to kill this process on startup - which in single-container mode
+    took the HTTP API down with it, and with it `/health`, the one place
+    that would have told you Redis was the problem. A worker whose broker
+    is missing should wait for it and say so, not exit.
+    """
+    delay = 1
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            get_redis().ping()
+            if attempt > 1:
+                logger.info("Redis reachable after %d attempts", attempt)
+            return
+        except (RedisError, OSError) as exc:
+            logger.warning(
+                "Redis at %s is not reachable (%s); retrying in %ds",
+                REDIS_URL, exc, delay,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, 30)
+
+
 def main() -> None:
     jobstore.JOB_DIR.mkdir(parents=True, exist_ok=True)
+    wait_for_redis()
 
     # Daemon thread: it goes away with the process, and RQ installs its own
     # signal handlers once work() starts, so there is nothing to unwind.
