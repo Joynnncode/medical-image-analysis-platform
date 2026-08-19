@@ -126,7 +126,7 @@ def run_inference(
 
     progress.stage("inference")
     predictor = progress.wrap_predictor(net, tuple(image.shape[2:]), ROI_SIZE, SW_OVERLAP)
-    with torch.no_grad():
+    with torch.inference_mode():
         logits = sliding_window_inference(
             inputs=image,
             roi_size=ROI_SIZE,
@@ -134,10 +134,16 @@ def run_inference(
             predictor=predictor,
             overlap=SW_OVERLAP,
         )
-        probs = torch.softmax(logits, dim=1)
 
     progress.stage("postprocessing")
-    data["pred"] = probs[0].cpu()
+    # No softmax: it is monotonic per voxel, so it cannot change which channel
+    # wins the argmax below - it only allocates a second copy of the logits.
+    data["pred"] = logits[0].cpu()
+    del logits
+    # The resampled input is not read again; on a small host it is worth the
+    # explicit drop before the mask is built.
+    data.pop("image", None)
+    del image
     data = Compose([AsDiscreted(keys="pred", argmax=True)])(data)
     mask_resampled = np.asarray(data["pred"][0]).astype(np.uint8)
     mask_affine = np.asarray(data["pred"].affine, dtype=np.float64)
