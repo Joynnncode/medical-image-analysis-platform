@@ -19,6 +19,7 @@ from rq import Queue, Retry
 from rq.job import Job
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL_IS_DEFAULT = "REDIS_URL" not in os.environ
 QUEUE_NAME = os.environ.get("SEGMENTATION_QUEUE", "segmentation")
 
 # Hard ceiling on a single job. A work horse still stuck after this is
@@ -44,6 +45,20 @@ DLQ_ENTRIES_KEY = "medimg:dlq:entries"  # hash of job id -> JSON envelope
 DLQ_MAX_ENTRIES = int(os.environ.get("DLQ_MAX_ENTRIES", "500"))
 
 _redis: Redis | None = None
+
+
+def safe_redis_url() -> str:
+    """REDIS_URL without its credentials, for logs.
+
+    Managed providers hand out external URLs of the form
+    rediss://:password@host:port, and a connection problem is exactly when
+    that URL gets printed.
+    """
+    scheme, _, rest = REDIS_URL.partition("://")
+    if "@" in rest:
+        rest = rest.rsplit("@", 1)[1]
+        return f"{scheme}://***@{rest}"
+    return REDIS_URL
 
 
 def get_redis() -> Redis:
