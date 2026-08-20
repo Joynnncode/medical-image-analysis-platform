@@ -5,11 +5,46 @@ namespace MedicalImageAnalysis.Api.Services;
 
 public class AiServiceClient : IAiServiceClient
 {
+    // A free-tier host suspends a service that has been idle and answers the
+    // first request against it with an error while it boots, rather than
+    // holding the connection until it is ready. Left alone that turns every
+    // first segmentation after a quiet spell into a failure the user has to
+    // click through - so wait for the service to wake before sending work.
+    private static readonly TimeSpan WakeTimeout = TimeSpan.FromMinutes(2);
+    private const int TransientRetries = 3;
+
     private readonly HttpClient _httpClient;
 
     public AiServiceClient(HttpClient httpClient)
     {
         _httpClient = httpClient;
+    }
+
+    /// Polls /health until the AI service answers, so the caller's real
+    /// request doesn't land on a service that is still starting.
+    ///
+    /// Gives up quietly on timeout: the request that follows is a better
+    /// place to report a service that is genuinely down.
+    private async Task WaitUntilAwakeAsync(CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + WakeTimeout;
+        var delay = TimeSpan.FromSeconds(2);
+
+        while (true)
+        {
+            try
+            {
+                using var response = await _httpClient.GetAsync("/health", ct);
+                if (response.IsSuccessStatusCode) return;
+            }
+            catch (HttpRequestException) { }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
+
+            if (DateTime.UtcNow + delay >= deadline) return;
+
+            await Task.Delay(delay, ct);
+            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 10));
+        }
     }
 
     public async Task<SegmentationOutcome> SegmentAsync(
@@ -20,6 +55,10 @@ public class AiServiceClient : IAiServiceClient
         fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("application/octet-stream");
         content.Add(fileContent, "file", fileName);
         content.Add(new StringContent(organ), "organ");
+
+        // Wake it first: a retry here would re-upload the volume and re-run a
+        // minutes-long inference, so it is worth paying for the certainty.
+        await WaitUntilAwakeAsync(ct);
 
         using var response = await _httpClient.PostAsync("/segment", content, ct);
         if (!response.IsSuccessStatusCode)
@@ -51,9 +90,37 @@ public class AiServiceClient : IAiServiceClient
         );
     }
 
+    private async Task<HttpResponseMessage> GetWithRetryAsync(string path, CancellationToken ct)
+    {
+        var delay = TimeSpan.FromSeconds(2);
+
+        for (var attempt = 1; ; attempt++)
+        {
+            HttpResponseMessage? response = null;
+            try
+            {
+                response = await _httpClient.GetAsync(path, ct);
+                if (response.IsSuccessStatusCode || attempt > TransientRetries) return response;
+            }
+            catch (Exception ex) when (
+                attempt <= TransientRetries
+                && (ex is HttpRequestException
+                    || (ex is TaskCanceledException && !ct.IsCancellationRequested)))
+            {
+                // Falls through to the delay below.
+            }
+
+            response?.Dispose();
+            await Task.Delay(delay, ct);
+            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 10));
+        }
+    }
+
     public async Task<(List<OrganOption> Organs, string Default)> GetOrgansAsync(CancellationToken ct = default)
     {
-        using var response = await _httpClient.GetAsync("/organs", ct);
+        // Cheap and idempotent, so this one just retries - it is the first
+        // call the scan page makes, and it is usually what wakes the service.
+        using var response = await GetWithRetryAsync("/organs", ct);
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
