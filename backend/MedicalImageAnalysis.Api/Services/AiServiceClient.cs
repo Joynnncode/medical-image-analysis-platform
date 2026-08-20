@@ -10,7 +10,14 @@ public class AiServiceClient : IAiServiceClient
     // holding the connection until it is ready. Left alone that turns every
     // first segmentation after a quiet spell into a failure the user has to
     // click through - so wait for the service to wake before sending work.
-    private static readonly TimeSpan WakeTimeout = TimeSpan.FromMinutes(2);
+    // Measured against Render: a suspended service does not answer with an
+    // error while it boots - the connection is simply held open until it is
+    // ready. Six probes with a 5s timeout all timed out during a boot, while
+    // one long request was held for 41s and then returned 200. So waking it
+    // means asking once and waiting, not polling: any per-request timeout
+    // shorter than the boot never sees the answer.
+    private static readonly TimeSpan WakeProbeTimeout = TimeSpan.FromSeconds(90);
+    private const int WakeAttempts = 2;
     private const int TransientRetries = 3;
 
     private readonly HttpClient _httpClient;
@@ -20,30 +27,28 @@ public class AiServiceClient : IAiServiceClient
         _httpClient = httpClient;
     }
 
-    /// Polls /health until the AI service answers, so the caller's real
-    /// request doesn't land on a service that is still starting.
+    /// Waits for the AI service to be ready to serve, so the caller's real
+    /// request doesn't land on one that is still starting.
     ///
-    /// Gives up quietly on timeout: the request that follows is a better
-    /// place to report a service that is genuinely down.
+    /// Gives up quietly once the attempts are spent: the request that follows
+    /// is a better place to report a service that is genuinely down.
     private async Task WaitUntilAwakeAsync(CancellationToken ct)
     {
-        var deadline = DateTime.UtcNow + WakeTimeout;
-        var delay = TimeSpan.FromSeconds(2);
-
-        while (true)
+        for (var attempt = 1; attempt <= WakeAttempts; attempt++)
         {
+            // Bound each attempt separately. If the host's edge gives up on a
+            // boot that is taking too long, the boot itself keeps going, so a
+            // second ask usually lands on a service that is now up.
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            attemptCts.CancelAfter(WakeProbeTimeout);
+
             try
             {
-                using var response = await _httpClient.GetAsync("/health", ct);
+                using var response = await _httpClient.GetAsync("/health", attemptCts.Token);
                 if (response.IsSuccessStatusCode) return;
             }
             catch (HttpRequestException) { }
-            catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
-
-            if (DateTime.UtcNow + delay >= deadline) return;
-
-            await Task.Delay(delay, ct);
-            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 10));
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
         }
     }
 
