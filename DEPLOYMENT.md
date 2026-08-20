@@ -26,13 +26,22 @@ Render hosts all five pieces:
 - The free Postgres database **expires after 90 days** and needs to be
   recreated (not upgraded automatically). See the last section for the
   2-minute fix when that happens.
-- Render's free plan has no **Background Worker** service type, so the AI
-  service container runs one queue worker alongside its HTTP API (the
-  image's default `start-all.sh` does exactly this). Segmentation still
-  runs as a proper background job with progress and retries — there is just
-  one worker, and it shares the instance's memory with the API. Anywhere
-  with a worker service type (or Docker Compose locally), run the workers
-  as their own service and scale them independently.
+- ⚠️ **The queued version of segmentation does not fit on the free plan.**
+  Everything below deploys and starts fine, but the first segmentation is
+  killed: the AI service needs ~634MB and a free instance allows 512MB.
+  Measured in a 512MB container — torch imports at 228MB, MONAI takes that
+  to 307MB, the loaded model to 353MB, inference peaks at 438MB, plus ~55MB
+  for the HTTP process that has to stay responsive beside it. The floor is
+  the libraries rather than the tensors, so there is nothing to trim. Give
+  the AI service ~1GB (any host with a 1GB tier), or deploy the synchronous
+  version that preceded the queue, which fits in 512MB because a single
+  process does both jobs. The rest of this guide is written for a host that
+  has the memory.
+- Render's free plan also has no **Background Worker** service type, so the
+  AI service container runs one queue worker alongside its HTTP API (the
+  image's default `start-all.sh` does exactly this). Anywhere with a worker
+  service type (or Docker Compose locally), run the workers as their own
+  service and scale them independently.
 - The free Key Value instance has no persistence and a small memory cap. If
   it evicts a job, the API notices the job has vanished and marks that scan
   as failed rather than waiting forever — re-run the segmentation.

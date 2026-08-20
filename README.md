@@ -61,6 +61,16 @@ The queue is bounded (`MAX_QUEUE_DEPTH`, default 50): past that, new jobs are
 refused with `503` and a `Retry-After` rather than piling up. Concurrency is
 the number of workers - `docker compose up --scale ai-worker=3`.
 
+**What the live demo runs.** Not this. The hosted demo above serves the
+earlier synchronous path, because the queue needs one process answering HTTP
+and another running inference, and the two do not fit the 512MB a free
+instance gets. Measured in a 512MB container: torch imports at 228MB, MONAI
+takes that to 307MB, the loaded model to 353MB, and inference peaks at
+438MB - 634MB in total with the API process alongside it. The floor is the
+libraries, not the tensors, so there is nothing to trim; running the queue
+live needs roughly 1GB. `docker compose up` runs the whole thing locally,
+workers, progress, retries and dead letter queue included.
+
 See [ai-service/README.md](ai-service/README.md) for the job endpoints, the
 dead letter queue tooling, and the full set of tuning knobs.
 
