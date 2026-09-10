@@ -25,6 +25,10 @@ export interface SegmentationResult {
   modelName: string;
   organ: string;
   organDisplayName: string;
+  /** False once retention has reclaimed the mask file. The numbers above are
+      still true - there is just nothing left to overlay. */
+  maskAvailable: boolean;
+  createdAt: string;
 }
 
 export type SegmentationJobStatus =
@@ -64,6 +68,20 @@ export function isJobActive(job: SegmentationJob | null | undefined): boolean {
   // build, a rolled-back deploy - hands this `undefined`, and reading .status
   // off that takes the whole page down.
   return !!job && ACTIVE_JOB_STATUSES.has(job.status);
+}
+
+/** One run in the scan's history. Failed runs are here too - a history of
+    only the successes cannot answer "did this ever go wrong". */
+export interface SegmentationRun {
+  id: string;
+  status: SegmentationJobStatus;
+  organ: string;
+  attempt: number;
+  maxAttempts: number;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  result: SegmentationResult | null;
 }
 
 export interface ScanDetail extends ScanBase {

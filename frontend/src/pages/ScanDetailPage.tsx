@@ -2,9 +2,15 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AxiosError } from "axios";
 import { apiClient } from "../api/client";
-import type { OrganOption, ScanDetail, SegmentationJob } from "../api/types";
+import type {
+  OrganOption,
+  ScanDetail,
+  SegmentationJob,
+  SegmentationRun,
+} from "../api/types";
 import { isJobActive } from "../api/types";
 import { NiivueViewer } from "../components/NiivueViewer";
+import { RunHistory } from "../components/RunHistory";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -29,6 +35,10 @@ export function ScanDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [scan, setScan] = useState<ScanDetail | null>(null);
   const [job, setJob] = useState<SegmentationJob | null>(null);
+  const [runs, setRuns] = useState<SegmentationRun[]>([]);
+  // null means "whatever is newest", so a run that finishes while the page
+  // is open becomes the selected one without the user doing anything.
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [organs, setOrgans] = useState<OrganOption[]>([]);
   const [selectedOrgan, setSelectedOrgan] = useState("spleen");
   const [loading, setLoading] = useState(true);
@@ -47,6 +57,12 @@ export function ScanDetailPage() {
     }
   };
 
+  const fetchRuns = async () => {
+    if (!id) return;
+    const { data } = await apiClient.get<SegmentationRun[]>(`/scans/${id}/runs`);
+    setRuns(data);
+  };
+
   const fetchOrgans = async () => {
     const { data } = await apiClient.get<{ organs: OrganOption[]; default: string }>(
       "/organs"
@@ -57,7 +73,7 @@ export function ScanDetailPage() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchScan(), fetchOrgans()]).finally(() => setLoading(false));
+    Promise.all([fetchScan(), fetchRuns(), fetchOrgans()]).finally(() => setLoading(false));
   }, [id]);
 
   // Follow the job to its conclusion. The run belongs to the server, so this
@@ -77,7 +93,7 @@ export function ScanDetailPage() {
           if (data.status === "Failed" || data.status === "DeadLettered") {
             setError(failureMessage(data));
           }
-          await fetchScan();
+          await Promise.all([fetchScan(), fetchRuns()]);
         }
       } catch (err) {
         if (abandoned) return;
@@ -103,6 +119,9 @@ export function ScanDetailPage() {
       );
       setScan(data);
       setJob(data.job ?? null);
+      // Follow the run that was just started, not whatever was being viewed.
+      setSelectedRunId(null);
+      await fetchRuns();
     } catch (err) {
       console.error(err);
       setError(enqueueError(err));
@@ -116,7 +135,7 @@ export function ScanDetailPage() {
     setCancelling(true);
     try {
       await apiClient.delete(`/scans/${id}/job`);
-      await fetchScan();
+      await Promise.all([fetchScan(), fetchRuns()]);
     } catch (err) {
       console.error(err);
       setError("Could not cancel the job - it may have already finished.");
@@ -129,7 +148,24 @@ export function ScanDetailPage() {
   if (!scan) return <div className="page">Scan not found.</div>;
 
   const active = isJobActive(job);
-  const hasResult = scan.result !== null;
+
+  // All computed here rather than held in state: every one of them is a pure
+  // function of runs + selection, and a copy in state is a second source of
+  // truth that has to be kept correct by hand.
+  const selectedRun = runs.find((r) => r.id === selectedRunId) ?? runs[0] ?? null;
+
+  // The selected run may have produced nothing - it failed, was cancelled, or
+  // is still going. Falling back to the scan's newest result means a failed
+  // re-run does not blank out an answer the user already had. scan.result
+  // rather than a run's, so results predating run tracking still show.
+  const displayedResult = selectedRun?.result ?? scan.result;
+  const showingEarlierRun = displayedResult !== null && !selectedRun?.result;
+
+  const maskUrl = !displayedResult?.maskAvailable
+    ? undefined
+    : selectedRun?.result
+      ? `/scans/${scan.id}/runs/${selectedRun.id}/mask`
+      : `/scans/${scan.id}/mask`;
 
   return (
     <div className="page">
@@ -197,40 +233,64 @@ export function ScanDetailPage() {
 
       {error && <div className="form-error">{error}</div>}
 
-      {scan.result && (
+      {showingEarlierRun && displayedResult && (
+        <div className="result-provenance">
+          The selected run produced no result. Showing the{" "}
+          {displayedResult.organDisplayName} result from{" "}
+          {new Date(displayedResult.createdAt).toLocaleString()} instead.
+        </div>
+      )}
+
+      {displayedResult && (
         <div className="stats-grid">
           <div className="stat-tile">
             <div className="stat-label">Organ</div>
             <div className="stat-value" style={{ fontSize: "0.95rem" }}>
-              {scan.result.organDisplayName}
+              {displayedResult.organDisplayName}
             </div>
           </div>
           <div className="stat-tile">
             <div className="stat-label">Voxel count</div>
-            <div className="stat-value">{scan.result.voxelCount.toLocaleString()}</div>
+            <div className="stat-value">{displayedResult.voxelCount.toLocaleString()}</div>
           </div>
           <div className="stat-tile">
             <div className="stat-label">Volume (mL)</div>
-            <div className="stat-value">{scan.result.volumeMl.toFixed(1)}</div>
+            <div className="stat-value">{displayedResult.volumeMl.toFixed(1)}</div>
           </div>
           <div className="stat-tile">
             <div className="stat-label">Inference time</div>
-            <div className="stat-value">{scan.result.inferenceTimeMs.toFixed(0)} ms</div>
+            <div className="stat-value">{displayedResult.inferenceTimeMs.toFixed(0)} ms</div>
           </div>
           <div className="stat-tile">
             <div className="stat-label">Model</div>
             <div className="stat-value" style={{ fontSize: "0.95rem" }}>
-              {scan.result.modelName}
+              {displayedResult.modelName}
             </div>
           </div>
         </div>
       )}
 
+      {displayedResult && !displayedResult.maskAvailable && (
+        <div className="result-provenance">
+          The mask for this run is no longer stored - only the newest few are
+          kept. The measurements above still stand; re-run the segmentation to
+          see the overlay again.
+        </div>
+      )}
+
       <NiivueViewer
         scanId={scan.id}
-        hasMask={hasResult}
+        maskUrl={maskUrl}
         maskVersion={job?.status === "Completed" ? job.updatedAt : undefined}
       />
+
+      {runs.length > 1 && (
+        <RunHistory
+          runs={runs}
+          selectedRunId={selectedRun?.id ?? null}
+          onSelect={setSelectedRunId}
+        />
+      )}
     </div>
   );
 }

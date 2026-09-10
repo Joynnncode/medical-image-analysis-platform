@@ -236,3 +236,77 @@ h1, h2, h3 {
   color: var(--text-muted);
   margin-left: 0.6rem;
 }
+
+/* Run history -------------------------------------------------------- */
+
+.run-history {
+  margin-top: 1.5rem;
+}
+
+.run-history-head {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.run-list li + li .run-row {
+  border-top: 1px solid var(--border);
+}
+
+.run-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(6rem, max-content) 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-row:hover {
+  background: var(--surface-raised);
+}
+
+.run-row.is-selected {
+  background: var(--surface-raised);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.run-organ {
+  font-size: 0.9rem;
+}
+
+.run-detail,
+.run-when {
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Says which run the numbers below actually came from, when it is not the
+   one selected. Without it, a failed re-run looks like it succeeded. */
+.result-provenance {
+  margin-top: 1.25rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}

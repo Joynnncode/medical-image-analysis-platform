@@ -229,6 +229,49 @@ public class ScansController : ControllerBase
         return Ok(ToJobDto(job));
     }
 
+    /// Every run this scan has had, newest first, failures included.
+    [HttpGet("{id:guid}/runs")]
+    public async Task<ActionResult<List<SegmentationRunDto>>> ListRuns(Guid id)
+    {
+        if (!await _db.Scans.AnyAsync(s => s.Id == id && s.UserId == CurrentUserId))
+            return NotFound();
+
+        var runs = await _db.SegmentationJobs
+            .Where(j => j.ScanId == id)
+            .Include(j => j.Result)
+            .OrderByDescending(j => j.CreatedAt)
+            .ToListAsync();
+
+        return Ok(runs.Select(j => new SegmentationRunDto(
+            j.Id,
+            j.Status.ToString(),
+            j.Organ,
+            j.Attempt,
+            j.MaxAttempts,
+            j.ErrorMessage,
+            j.CreatedAt,
+            j.CompletedAt,
+            j.Result is null ? null : ToResultDto(j.Result)
+        )).ToList());
+    }
+
+    [HttpGet("{id:guid}/runs/{runId:guid}/mask")]
+    public async Task<IActionResult> DownloadRunMask(Guid id, Guid runId)
+    {
+        if (!await _db.Scans.AnyAsync(s => s.Id == id && s.UserId == CurrentUserId))
+            return NotFound();
+
+        var result = await _db.SegmentationResults
+            .SingleOrDefaultAsync(r => r.JobId == runId && r.ScanId == id);
+
+        if (result is null) return NotFound();
+        if (!result.HasMask) return StatusCode(410, "The mask for this run is no longer stored.");
+        if (!System.IO.File.Exists(result.MaskStoredPath)) return NotFound();
+
+        var bytes = await System.IO.File.ReadAllBytesAsync(result.MaskStoredPath);
+        return File(bytes, "application/gzip", "mask.nii.gz");
+    }
+
     [HttpDelete("{id:guid}/job")]
     public async Task<IActionResult> CancelJob(Guid id)
     {
@@ -293,16 +336,7 @@ public class ScansController : ControllerBase
     private static ScanDetailDto ToDetailDto(Scan scan, SegmentationJob? job)
     {
         var latest = scan.LatestResult;
-        SegmentationResultDto? resultDto = latest is null
-            ? null
-            : new SegmentationResultDto(
-                latest.VoxelCount,
-                latest.VolumeMl,
-                latest.InferenceTimeMs,
-                latest.ModelName,
-                latest.Organ,
-                latest.OrganDisplayName
-            );
+        SegmentationResultDto? resultDto = latest is null ? null : ToResultDto(latest);
 
         return new ScanDetailDto(
             scan.Id,
@@ -312,6 +346,17 @@ public class ScansController : ControllerBase
             resultDto,
             job is null ? null : ToJobDto(job));
     }
+
+    private static SegmentationResultDto ToResultDto(SegmentationResult result) => new(
+        result.VoxelCount,
+        result.VolumeMl,
+        result.InferenceTimeMs,
+        result.ModelName,
+        result.Organ,
+        result.OrganDisplayName,
+        result.HasMask,
+        result.CreatedAt
+    );
 
     private static SegmentationJobDto ToJobDto(SegmentationJob job) => new(
         job.Status.ToString(),

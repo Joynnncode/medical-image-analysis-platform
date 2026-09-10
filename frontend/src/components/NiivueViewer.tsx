@@ -4,7 +4,10 @@ import { apiClient } from "../api/client";
 
 interface Props {
   scanId: string;
-  hasMask: boolean;
+  /** Which mask to overlay, or undefined for none. Passed in rather than
+      derived here: with a run history there is more than one mask a scan
+      could show, and the page is what knows which one is being looked at. */
+  maskUrl?: string;
   /** Changes whenever a new mask is produced, so re-segmenting the same
       scan (a different organ, or a second run) reloads the overlay. */
   maskVersion?: string;
@@ -19,7 +22,7 @@ interface VolumeOptions {
   cal_max?: number;
 }
 
-export function NiivueViewer({ scanId, hasMask, maskVersion }: Props) {
+export function NiivueViewer({ scanId, maskUrl, maskVersion }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +45,8 @@ export function NiivueViewer({ scanId, hasMask, maskVersion }: Props) {
           { url: imageUrl, colormap: "gray", opacity: 1, name: "scan.nii.gz" },
         ];
 
-        if (hasMask) {
-          const maskResp = await apiClient.get(`/scans/${scanId}/mask`, {
+        if (maskUrl) {
+          const maskResp = await apiClient.get(maskUrl, {
             responseType: "blob",
           });
           const maskUrl = URL.createObjectURL(maskResp.data);
@@ -82,7 +85,7 @@ export function NiivueViewer({ scanId, hasMask, maskVersion }: Props) {
       cancelled = true;
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [scanId, hasMask, maskVersion]);
+  }, [scanId, maskUrl, maskVersion]);
 
   return (
     <div className="viewer">
