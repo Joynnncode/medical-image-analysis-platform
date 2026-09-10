@@ -67,9 +67,16 @@ public class SegmentationJobMonitor : BackgroundService
     /// A job is claimed in Postgres before the volume is sent to the AI
     /// service, so there is a window where it has no external id and the
     /// request that owns it is still uploading. Past this, the request that
-    /// created it cannot still be running.
+    /// created it is taken to be dead and the claim is released.
+    ///
+    /// Two minutes is generous for what the handoff actually is: the API
+    /// streaming a file it already has on disk to a service in the same
+    /// region, which enqueues it and answers. It does not wait for a model.
+    /// The trade being made is against the other side - an API instance that
+    /// dies mid-handoff locks that scan out of new segmentations for exactly
+    /// this long.
     private TimeSpan PendingHandoffTimeout =>
-        TimeSpan.FromMinutes(_config.GetValue("SegmentationJobs:PendingHandoffTimeoutMinutes", 5));
+        TimeSpan.FromMinutes(_config.GetValue("SegmentationJobs:PendingHandoffTimeoutMinutes", 2));
 
     private string StorageRoot => _config["Storage:Root"] ?? "./storage";
 
