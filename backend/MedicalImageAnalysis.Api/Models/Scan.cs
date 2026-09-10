@@ -19,4 +19,9 @@ public class Scan
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
 
     public SegmentationResult? SegmentationResult { get; set; }
+
+    /// What the scan's status reverts to when nothing is running.
+    /// Requires SegmentationResult to have been loaded.
+    public ScanStatus IdleStatus =>
+        SegmentationResult is not null ? ScanStatus.Completed : ScanStatus.Uploaded;
 }

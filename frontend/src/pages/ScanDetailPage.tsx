@@ -1,3 +1,4 @@
+import axios from "axios";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiClient } from "../api/client";
@@ -43,7 +44,14 @@ export function ScanDetailPage() {
       setScan(data);
     } catch (err) {
       console.error(err);
-      setError("Segmentation failed. Check the API / AI service logs.");
+      // A 503 means the AI service was busy and never started this run -
+      // telling the user it failed would be reporting work that never
+      // happened, and they would have no reason to try again.
+      setError(
+        axios.isAxiosError(err) && err.response?.status === 503
+          ? "Another segmentation is already running. Try again in a moment."
+          : "Segmentation failed. Check the API / AI service logs."
+      );
     } finally {
       setSegmenting(false);
     }

@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace MedicalImageAnalysis.Api.Services;
 
 public record SegmentationOutcome(
@@ -11,6 +13,18 @@ public record SegmentationOutcome(
 );
 
 public record OrganOption(string Key, string DisplayName);
+
+/// Thrown when the AI service answers with an error status, so callers can
+/// distinguish "busy, come back later" (503) from a genuine fault.
+public class AiServiceException : Exception
+{
+    public AiServiceException(HttpStatusCode statusCode, string message) : base(message)
+        => StatusCode = statusCode;
+
+    public HttpStatusCode StatusCode { get; }
+
+    public bool IsBackpressure => StatusCode == HttpStatusCode.ServiceUnavailable;
+}
 
 public interface IAiServiceClient
 {

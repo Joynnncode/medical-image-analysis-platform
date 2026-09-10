@@ -25,7 +25,8 @@ public class AiServiceClient : IAiServiceClient
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(ct);
-            throw new InvalidOperationException($"AI service returned {response.StatusCode}: {error}");
+            throw new AiServiceException(
+                response.StatusCode, $"AI service returned {response.StatusCode}: {error}");
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);

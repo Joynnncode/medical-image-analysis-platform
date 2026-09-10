@@ -161,6 +161,19 @@ public class ScansController : ControllerBase
             scan.Status = ScanStatus.Completed;
             await _db.SaveChangesAsync();
         }
+        catch (AiServiceException ex) when (ex.IsBackpressure)
+        {
+            // Nothing ran, so this is not a failed segmentation. Marking the
+            // scan Failed here would report an error for work never attempted
+            // and leave a scan that has a perfectly good earlier result
+            // looking broken.
+            _logger.LogInformation(
+                "AI service busy; segmentation for scan {ScanId} was not started", scan.Id);
+            scan.Status = scan.IdleStatus;
+            await _db.SaveChangesAsync();
+            Response.Headers.RetryAfter = "30";
+            return StatusCode(503, "Another segmentation is already running. Try again shortly.");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Segmentation failed for scan {ScanId}", scan.Id);
