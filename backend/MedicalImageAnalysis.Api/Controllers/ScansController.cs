@@ -117,10 +117,16 @@ public class ScansController : ControllerBase
     {
         var scan = await LoadScanAsync(id);
 
-        if (scan?.SegmentationResult is null) return NotFound();
-        if (!System.IO.File.Exists(scan.SegmentationResult.MaskStoredPath)) return NotFound();
+        var result = scan?.LatestResult;
+        if (result is null) return NotFound();
 
-        var bytes = await System.IO.File.ReadAllBytesAsync(scan.SegmentationResult.MaskStoredPath);
+        // Reclaimed by the retention policy: the run and its measurements are
+        // still on the record, the file is not. Distinguishable from "no such
+        // scan" on purpose - the two mean different things to a caller.
+        if (!result.HasMask) return StatusCode(410, "The mask for this run is no longer stored.");
+        if (!System.IO.File.Exists(result.MaskStoredPath)) return NotFound();
+
+        var bytes = await System.IO.File.ReadAllBytesAsync(result.MaskStoredPath);
         return File(bytes, "application/gzip", "mask.nii.gz");
     }
 
@@ -275,7 +281,7 @@ public class ScansController : ControllerBase
 
     private Task<Scan?> LoadScanAsync(Guid id) =>
         _db.Scans
-            .Include(s => s.SegmentationResult)
+            .Include(s => s.Results)
             .SingleOrDefaultAsync(s => s.Id == id && s.UserId == CurrentUserId);
 
     private Task<SegmentationJob?> LatestJobAsync(Guid scanId) =>
@@ -286,15 +292,16 @@ public class ScansController : ControllerBase
 
     private static ScanDetailDto ToDetailDto(Scan scan, SegmentationJob? job)
     {
-        SegmentationResultDto? resultDto = scan.SegmentationResult is null
+        var latest = scan.LatestResult;
+        SegmentationResultDto? resultDto = latest is null
             ? null
             : new SegmentationResultDto(
-                scan.SegmentationResult.VoxelCount,
-                scan.SegmentationResult.VolumeMl,
-                scan.SegmentationResult.InferenceTimeMs,
-                scan.SegmentationResult.ModelName,
-                scan.SegmentationResult.Organ,
-                scan.SegmentationResult.OrganDisplayName
+                latest.VoxelCount,
+                latest.VolumeMl,
+                latest.InferenceTimeMs,
+                latest.ModelName,
+                latest.Organ,
+                latest.OrganDisplayName
             );
 
         return new ScanDetailDto(

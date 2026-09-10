@@ -26,9 +26,23 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<SegmentationResult>()
             .HasOne(r => r.Scan)
-            .WithOne(s => s.SegmentationResult)
-            .HasForeignKey<SegmentationResult>(r => r.ScanId)
+            .WithMany(s => s.Results)
+            .HasForeignKey(r => r.ScanId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // A run produces at most one result. The foreign key is nullable, and
+        // Postgres lets a unique index hold any number of nulls, so the rows
+        // that predate run tracking coexist with it.
+        modelBuilder.Entity<SegmentationResult>()
+            .HasOne(r => r.Job)
+            .WithOne(j => j.Result)
+            .HasForeignKey<SegmentationResult>(r => r.JobId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // "This scan's results, newest first" is the page's main query and
+        // the retention sweep's only query.
+        modelBuilder.Entity<SegmentationResult>()
+            .HasIndex(r => new { r.ScanId, r.CreatedAt });
 
         modelBuilder.Entity<SegmentationJob>()
             .HasOne(j => j.Scan)

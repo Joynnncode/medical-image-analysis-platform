@@ -39,6 +39,9 @@ public class SegmentationJob
     public int MaxAttempts { get; set; } = 1;
     public string? ErrorMessage { get; set; }
 
+    /// What this run produced, once it succeeded.
+    public SegmentationResult? Result { get; set; }
+
     /// Which SegmentationJobMonitor instance currently holds this job, and
     /// until when. A lease rather than a lock: an API instance that dies
     /// mid-collection would never release a lock, and the job would then be

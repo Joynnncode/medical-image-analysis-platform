@@ -78,6 +78,13 @@ public class SegmentationJobMonitor : BackgroundService
     private TimeSpan PendingHandoffTimeout =>
         TimeSpan.FromMinutes(_config.GetValue("SegmentationJobs:PendingHandoffTimeoutMinutes", 2));
 
+    /// How many masks a scan keeps. The result rows are never deleted - the
+    /// measurements are the history, and they cost a few dozen bytes each.
+    /// What this bounds is the mask files, which are tens of MB apiece and
+    /// which a re-run reproduces.
+    private int MaskRetentionCount =>
+        Math.Max(1, _config.GetValue("SegmentationJobs:MaskRetentionCount", 5));
+
     private string StorageRoot => _config["Storage:Root"] ?? "./storage";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -112,7 +119,7 @@ public class SegmentationJobMonitor : BackgroundService
 
         var jobs = await db.SegmentationJobs
             .Include(j => j.Scan)
-            .ThenInclude(s => s!.SegmentationResult)
+            .ThenInclude(s => s!.Results)
             .Where(j => ActiveStatuses.Contains(j.Status)
                 || (j.Status == SegmentationJobStatus.DeadLettered
                     && j.UpdatedAt > deadLetterCutoff
@@ -278,20 +285,28 @@ public class SegmentationJobMonitor : BackgroundService
         var scan = job.Scan!;
         var maskBytes = await ai.DownloadMaskAsync(job.ExternalJobId, ct);
 
-        var scanDir = Path.Combine(StorageRoot, "scans", scan.Id.ToString());
-        Directory.CreateDirectory(scanDir);
-        var maskPath = Path.Combine(scanDir, "mask.nii.gz");
+        // Keyed on the job, not the scan. A retry of this same run overwrites
+        // its own file, so a duplicate execution leaves one mask rather than
+        // two; a new run gets its own directory, so asking a second question
+        // does not erase the answer to the first. Deterministic per run is
+        // what makes those two different outcomes from the same rule.
+        var runDir = Path.Combine(StorageRoot, "scans", scan.Id.ToString(), "runs", job.Id.ToString());
+        Directory.CreateDirectory(runDir);
+        var maskPath = Path.Combine(runDir, "mask.nii.gz");
         await File.WriteAllBytesAsync(maskPath, maskBytes, ct);
 
-        var result = scan.SegmentationResult;
+        // One result per run, found by the job rather than the scan, so a
+        // retry updates the row this run already wrote instead of adding one.
+        var result = await db.SegmentationResults
+            .SingleOrDefaultAsync(r => r.JobId == job.Id, ct);
         if (result is null)
         {
-            result = new SegmentationResult { ScanId = scan.Id };
-            scan.SegmentationResult = result;
+            result = new SegmentationResult { ScanId = scan.Id, JobId = job.Id };
             db.SegmentationResults.Add(result);
         }
 
         result.MaskStoredPath = maskPath;
+        result.MaskReclaimedAt = null;
         result.VoxelCount = state.Result.VoxelCount;
         result.VolumeMl = state.Result.VolumeMl;
         result.InferenceTimeMs = state.Result.InferenceTimeMs;
@@ -316,6 +331,10 @@ public class SegmentationJobMonitor : BackgroundService
         // still collectable on the next pass.
         await db.SaveChangesAsync(ct);
 
+        // Only once the new result is durable. Reclaiming first would leave a
+        // scan with one fewer mask than it has results if this pass then died.
+        await PruneMasksAsync(db, scan.Id, ct);
+
         try
         {
             await ai.DeleteJobAsync(job.ExternalJobId, ct);
@@ -324,6 +343,51 @@ public class SegmentationJobMonitor : BackgroundService
         {
             _logger.LogWarning(ex, "Could not release job {JobId} on the AI service", job.ExternalJobId);
         }
+    }
+
+    /// Reclaims every mask on a scan beyond the newest MaskRetentionCount.
+    private async Task PruneMasksAsync(AppDbContext db, Guid scanId, CancellationToken ct)
+    {
+        var stale = await db.SegmentationResults
+            .Where(r => r.ScanId == scanId && r.MaskReclaimedAt == null)
+            .OrderByDescending(r => r.CreatedAt)
+            .Skip(MaskRetentionCount)
+            .ToListAsync(ct);
+
+        if (stale.Count == 0) return;
+
+        var reclaimed = 0;
+        foreach (var result in stale)
+        {
+            try
+            {
+                if (File.Exists(result.MaskStoredPath)) File.Delete(result.MaskStoredPath);
+
+                var dir = Path.GetDirectoryName(result.MaskStoredPath);
+                if (dir is not null && Directory.Exists(dir)
+                    && !Directory.EnumerateFileSystemEntries(dir).Any())
+                    Directory.Delete(dir);
+            }
+            catch (Exception ex)
+            {
+                // A file that would not delete is wasted space, not a wrong
+                // answer. Marking it reclaimed anyway would tell the UI the
+                // mask is gone when it is still there, so leave the row alone
+                // and let the next run try again.
+                _logger.LogWarning(ex, "Could not reclaim mask at {Path}", result.MaskStoredPath);
+                continue;
+            }
+
+            result.MaskReclaimedAt = DateTime.UtcNow;
+            reclaimed++;
+        }
+
+        if (reclaimed == 0) return;
+
+        await db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Reclaimed {Count} mask(s) for scan {ScanId}, keeping the newest {Keep}",
+            reclaimed, scanId, MaskRetentionCount);
     }
 
     private static void Fail(SegmentationJob job, string message)
