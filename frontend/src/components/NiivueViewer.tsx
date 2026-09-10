@@ -49,10 +49,10 @@ export function NiivueViewer({ scanId, maskUrl, maskVersion }: Props) {
           const maskResp = await apiClient.get(maskUrl, {
             responseType: "blob",
           });
-          const maskUrl = URL.createObjectURL(maskResp.data);
-          objectUrls.push(maskUrl);
+          const maskObjectUrl = URL.createObjectURL(maskResp.data);
+          objectUrls.push(maskObjectUrl);
           volumes.push({
-            url: maskUrl,
+            url: maskObjectUrl,
             colormap: "red",
             opacity: 0.6,
             name: "mask.nii.gz",
