@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using MedicalImageAnalysis.Api.Data;
 using MedicalImageAnalysis.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -107,30 +108,66 @@ public class SegmentationJobMonitor : BackgroundService
         }
     }
 
+    /// What this monitor considers its work: jobs still in flight, plus dead
+    /// lettered ones inside the grace window and due for their slower poll.
+    ///
+    /// Shared by the listing pass and the per-job reload so that "is this
+    /// still mine to do?" has one definition rather than two that can drift.
+    private static Expression<Func<SegmentationJob, bool>> IsCandidate(
+        DateTime deadLetterCutoff, DateTime deadLetterDue) =>
+        j => ActiveStatuses.Contains(j.Status)
+            || (j.Status == SegmentationJobStatus.DeadLettered
+                && j.UpdatedAt > deadLetterCutoff
+                && (j.LastPolledAt == null || j.LastPolledAt < deadLetterDue));
+
     private async Task PollAsync(CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var ai = scope.ServiceProvider.GetRequiredService<IAiServiceClient>();
-
         var now = DateTime.UtcNow;
         var deadLetterCutoff = now - DeadLetterGrace;
         var deadLetterDue = now - DeadLetterPollInterval;
 
-        var jobs = await db.SegmentationJobs
-            .Include(j => j.Scan)
-            .ThenInclude(s => s!.Results)
-            .Where(j => ActiveStatuses.Contains(j.Status)
-                || (j.Status == SegmentationJobStatus.DeadLettered
-                    && j.UpdatedAt > deadLetterCutoff
-                    && (j.LastPolledAt == null || j.LastPolledAt < deadLetterDue)))
-            .OrderBy(j => j.CreatedAt)
-            .ToListAsync(ct);
-
-        foreach (var job in jobs)
+        List<Guid> jobIds;
+        using (var listing = _scopeFactory.CreateScope())
         {
+            var db = listing.ServiceProvider.GetRequiredService<AppDbContext>();
+            jobIds = await db.SegmentationJobs
+                .Where(IsCandidate(deadLetterCutoff, deadLetterDue))
+                .OrderBy(j => j.CreatedAt)
+                .Select(j => j.Id)
+                .ToListAsync(ct);
+        }
+
+        foreach (var jobId in jobIds)
+        {
+            // A scope - and so a DbContext - per job rather than per pass.
+            // The jobs in a pass are independent, but one shared change
+            // tracker makes them anything but: SaveChanges writes every
+            // tracked change, not this job's. A job whose write is rejected -
+            // which is precisely what the terminal-state trigger does to the
+            // monitor that lost a race - stays Modified in the tracker, so
+            // the next job's SaveChanges resubmits it, is rejected again, and
+            // rolls back the innocent job with it. One loser would take every
+            // job behind it in the pass down, and each would be logged under
+            // the loser's id. Measured before this change: job B, polled
+            // successfully, never reached the database and reported job A's
+            // error as its own.
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var ai = scope.ServiceProvider.GetRequiredService<IAiServiceClient>();
+
+            SegmentationJob? job = null;
             try
             {
+                job = await db.SegmentationJobs
+                    .Include(j => j.Scan)
+                    .ThenInclude(s => s!.Results)
+                    .Where(IsCandidate(deadLetterCutoff, deadLetterDue))
+                    .FirstOrDefaultAsync(j => j.Id == jobId, ct);
+
+                // Finished, or taken past the candidate set, between the
+                // listing and here. Nothing to do and nothing wrong.
+                if (job is null) continue;
+
                 if (!await ClaimAsync(db, job, ct)) continue;
                 await PollJobAsync(db, ai, job, ct);
             }
@@ -140,7 +177,11 @@ public class SegmentationJobMonitor : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not update segmentation job {JobId}", job.ExternalJobId);
+                _logger.LogError(
+                    ex,
+                    "Could not update segmentation job {JobId} ({ExternalJobId})",
+                    jobId,
+                    job?.ExternalJobId ?? "not loaded");
             }
         }
     }
