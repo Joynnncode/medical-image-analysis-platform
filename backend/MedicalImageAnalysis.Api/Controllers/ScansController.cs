@@ -7,6 +7,7 @@ using MedicalImageAnalysis.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace MedicalImageAnalysis.Api.Controllers;
 
@@ -134,9 +135,32 @@ public class ScansController : ControllerBase
         if (scan is null) return NotFound();
         if (!System.IO.File.Exists(scan.StoredPath)) return NotFound("Original scan file is missing.");
 
-        var existing = await LatestJobAsync(id);
-        if (existing is not null && !existing.IsTerminal)
+        // Claim the scan first, then do the expensive part. Reading the latest
+        // job and inserting afterwards lets two simultaneous requests both pass
+        // the read and both enqueue: two full inferences, and a second result
+        // nobody asked for. The insert is the claim - a partial unique index on
+        // ScanId over the non-terminal statuses means the second one cannot
+        // land, so the database decides the winner rather than the interleaving
+        // of two application-level reads.
+        var job = new SegmentationJob
+        {
+            ScanId = scan.Id,
+            Organ = organ,
+            Status = SegmentationJobStatus.Pending,
+        };
+        _db.SegmentationJobs.Add(job);
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            _db.Entry(job).State = EntityState.Detached;
+            _logger.LogInformation(
+                "Refused a second segmentation for scan {ScanId}: one is already in flight", id);
             return Conflict("A segmentation job is already running for this scan.");
+        }
 
         SegmentationJobState state;
         try
@@ -146,34 +170,36 @@ public class ScansController : ControllerBase
         }
         catch (AiServiceException ex) when (ex.IsBackpressure)
         {
+            // Nothing was queued, so this is a refusal and not a failed run.
+            // Drop the claim rather than leaving a Failed job on the scan's
+            // record for work that was never attempted.
             _logger.LogWarning("Segmentation queue rejected scan {ScanId}: {Message}", id, ex.Message);
+            _db.SegmentationJobs.Remove(job);
+            await _db.SaveChangesAsync();
             Response.Headers.RetryAfter = "30";
             return StatusCode(503, "The segmentation queue is full. Please try again shortly.");
         }
         catch (AiServiceException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
         {
             _logger.LogWarning("AI service rejected scan {ScanId}: {Message}", id, ex.Message);
+            await ReleaseClaimAsFailedAsync(job, scan, "The AI service rejected this scan.");
             return BadRequest("The AI service rejected this scan. Check the file and organ.");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not queue segmentation for scan {ScanId}", id);
+            await ReleaseClaimAsFailedAsync(job, scan, "Could not reach the segmentation service.");
             return StatusCode(502, "Could not reach the segmentation service.");
         }
 
-        var job = new SegmentationJob
-        {
-            ScanId = scan.Id,
-            ExternalJobId = state.JobId,
-            Organ = organ,
-            Status = SegmentationJobStatus.Queued,
-            Progress = state.Progress,
-            Stage = state.Stage,
-            StageLabel = state.StageLabel,
-            Attempt = state.Attempt,
-            MaxAttempts = state.MaxAttempts,
-        };
-        _db.SegmentationJobs.Add(job);
+        job.ExternalJobId = state.JobId;
+        job.Status = SegmentationJobStatus.Queued;
+        job.Progress = state.Progress;
+        job.Stage = state.Stage;
+        job.StageLabel = state.StageLabel;
+        job.Attempt = state.Attempt;
+        job.MaxAttempts = state.MaxAttempts;
+        job.UpdatedAt = DateTime.UtcNow;
         scan.Status = ScanStatus.Queued;
         await _db.SaveChangesAsync();
 
@@ -229,6 +255,23 @@ public class ScansController : ControllerBase
 
         return NoContent();
     }
+
+    /// The claim was taken but the work never started. Recorded as Failed
+    /// rather than deleted: the user asked for a segmentation and did not get
+    /// one, and a scan that silently returns to idle gives them nothing to
+    /// read. Terminal, so it also releases the one-active-job claim.
+    private async Task ReleaseClaimAsFailedAsync(SegmentationJob job, Scan scan, string reason)
+    {
+        job.Status = SegmentationJobStatus.Failed;
+        job.ErrorMessage = reason;
+        job.UpdatedAt = DateTime.UtcNow;
+        job.CompletedAt = DateTime.UtcNow;
+        scan.Status = ScanStatus.Failed;
+        await _db.SaveChangesAsync();
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
     private Task<Scan?> LoadScanAsync(Guid id) =>
         _db.Scans

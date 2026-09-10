@@ -21,6 +21,11 @@ public class SegmentationJobMonitor : BackgroundService
         SegmentationJobStatus.Running,
     };
 
+    /// Identifies this monitor in the lease. Per instance rather than per
+    /// machine: two API processes on one host are exactly the case the lease
+    /// exists for.
+    private readonly string _owner = $"{Environment.MachineName}/{Environment.ProcessId}/{Guid.NewGuid():N}";
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<SegmentationJobMonitor> _logger;
@@ -51,6 +56,20 @@ public class SegmentationJobMonitor : BackgroundService
 
     private TimeSpan DeadLetterPollInterval =>
         TimeSpan.FromSeconds(_config.GetValue("SegmentationJobs:DeadLetterPollIntervalSeconds", 30));
+
+    /// How long a monitor's claim on a job holds. It has to outlast a whole
+    /// pass over one job, mask download included, or a second monitor takes
+    /// over work that is still going on. It is also how long a job waits if
+    /// the API instance holding it dies mid-collection.
+    private TimeSpan MonitorLease =>
+        TimeSpan.FromSeconds(_config.GetValue("SegmentationJobs:MonitorLeaseSeconds", 60));
+
+    /// A job is claimed in Postgres before the volume is sent to the AI
+    /// service, so there is a window where it has no external id and the
+    /// request that owns it is still uploading. Past this, the request that
+    /// created it cannot still be running.
+    private TimeSpan PendingHandoffTimeout =>
+        TimeSpan.FromMinutes(_config.GetValue("SegmentationJobs:PendingHandoffTimeoutMinutes", 5));
 
     private string StorageRoot => _config["Storage:Root"] ?? "./storage";
 
@@ -98,6 +117,7 @@ public class SegmentationJobMonitor : BackgroundService
         {
             try
             {
+                if (!await ClaimAsync(db, job, ct)) continue;
                 await PollJobAsync(db, ai, job, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -111,9 +131,50 @@ public class SegmentationJobMonitor : BackgroundService
         }
     }
 
+    /// Takes the lease on a job, or reports that someone else holds it.
+    ///
+    /// One conditional UPDATE rather than a read followed by a write: two
+    /// monitors reading "nobody holds this" and then both writing their own
+    /// name is the same defect this whole change is about, and it is the more
+    /// expensive one here - both would download the mask and both would write
+    /// the result. Zero rows updated means the other one won.
+    private async Task<bool> ClaimAsync(AppDbContext db, SegmentationJob job, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var expiry = now + MonitorLease;
+
+        var claimed = await db.SegmentationJobs
+            .Where(j => j.Id == job.Id
+                && (j.MonitorOwner == null
+                    || j.MonitorOwner == _owner
+                    || j.MonitorLeaseExpiresAt == null
+                    || j.MonitorLeaseExpiresAt < now))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.MonitorOwner, _owner)
+                .SetProperty(j => j.MonitorLeaseExpiresAt, expiry), ct);
+
+        return claimed > 0;
+    }
+
     private async Task PollJobAsync(
         AppDbContext db, IAiServiceClient ai, SegmentationJob job, CancellationToken ct)
     {
+        // Claimed, but the AI service has not given it an id yet - the request
+        // that created it is still uploading the volume. Looking up an empty
+        // id would find nothing and kill a request that is doing fine, so only
+        // give up once no such request could still be running.
+        if (string.IsNullOrEmpty(job.ExternalJobId))
+        {
+            if (DateTime.UtcNow - job.CreatedAt > PendingHandoffTimeout)
+            {
+                Fail(job, "The scan was never handed to the segmentation service.");
+                _logger.LogWarning(
+                    "Segmentation job {JobId} was never handed over and has been abandoned", job.Id);
+                await db.SaveChangesAsync(ct);
+            }
+            return;
+        }
+
         job.LastPolledAt = DateTime.UtcNow;
 
         var state = await ai.GetJobAsync(job.ExternalJobId, ct);

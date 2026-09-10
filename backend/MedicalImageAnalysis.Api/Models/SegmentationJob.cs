@@ -39,6 +39,14 @@ public class SegmentationJob
     public int MaxAttempts { get; set; } = 1;
     public string? ErrorMessage { get; set; }
 
+    /// Which SegmentationJobMonitor instance currently holds this job, and
+    /// until when. A lease rather than a lock: an API instance that dies
+    /// mid-collection would never release a lock, and the job would then be
+    /// stranded with no result for as long as the row survived. A lease just
+    /// expires and the next monitor takes over.
+    public string? MonitorOwner { get; set; }
+    public DateTime? MonitorLeaseExpiresAt { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastPolledAt { get; set; }
