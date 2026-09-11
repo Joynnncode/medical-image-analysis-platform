@@ -1,3 +1,4 @@
+import axios from "axios";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiClient } from "../api/client";
@@ -7,6 +8,22 @@ const REFRESH_INTERVAL_MS = 4000;
 
 function statusBadgeClass(status: string) {
   return `badge badge-${status.toLowerCase()}`;
+}
+
+// Every upload failure used to be reported as a rejected file type, which
+// is only one of the ways this can fail - and not the one that happens when
+// a session has quietly expired underneath a page that still looks logged in.
+function uploadErrorMessage(err: unknown): string {
+  if (!axios.isAxiosError(err)) return "Upload failed. Please try again.";
+
+  if (!err.response) return "Upload failed: couldn't reach the server.";
+
+  const { status, data } = err.response;
+  if (status === 401) return "Your session has expired. Please log in again.";
+  if (status === 413) return "Upload failed: that file is too large.";
+  // The API explains a 400 itself - an unsupported extension, an empty file.
+  if (status === 400 && typeof data === "string" && data.length > 0) return data;
+  return `Upload failed (${status}). Please try again.`;
 }
 
 function isInFlight(scan: ScanSummary) {
@@ -60,7 +77,7 @@ export function DashboardPage() {
       await fetchScans();
     } catch (err) {
       console.error(err);
-      setError("Upload failed. Only .nii / .nii.gz files are supported.");
+      setError(uploadErrorMessage(err));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

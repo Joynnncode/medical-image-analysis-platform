@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
-  const { login, guestLogin } = useAuth();
+  const { login, guestLogin, sessionExpired } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,7 +46,13 @@ export function LoginPage() {
     <div className="page page-narrow">
       <div className="card">
         <h1 style={{ fontSize: "1.4rem", marginBottom: "1.5rem" }}>Log in</h1>
-        {error && <div className="form-error">{error}</div>}
+        {error ? (
+          <div className="form-error">{error}</div>
+        ) : (
+          sessionExpired && (
+            <div className="form-error">Your session has expired. Please log in again.</div>
+          )
+        )}
         <form onSubmit={handleSubmit}>
           <div className="form-field">
             <label htmlFor="email">Email</label>
