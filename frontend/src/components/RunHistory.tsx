@@ -1,7 +1,10 @@
-import type { SegmentationJobStatus, SegmentationRun } from "../api/types";
+import type { OrganOption, SegmentationJobStatus, SegmentationRun } from "../api/types";
 
 interface Props {
   runs: SegmentationRun[];
+  /** Used to name runs that never produced a result, which is where the
+      display name otherwise comes from. */
+  organs: OrganOption[];
   /** The run currently being viewed. */
   selectedRunId: string | null;
   onSelect: (runId: string) => void;
@@ -27,7 +30,14 @@ function when(iso: string): string {
   });
 }
 
-export function RunHistory({ runs, selectedRunId, onSelect }: Props) {
+export function RunHistory({ runs, organs, selectedRunId, onSelect }: Props) {
+  // A failed or cancelled run has no result to carry a display name, so look
+  // the key up; fall back to the key itself if the organ list did not load.
+  const organName = (run: SegmentationRun) =>
+    run.result?.organDisplayName ??
+    organs.find((o) => o.key === run.organ)?.displayName ??
+    run.organ;
+
   return (
     <div className="run-history">
       <div className="run-history-head">
@@ -45,9 +55,7 @@ export function RunHistory({ runs, selectedRunId, onSelect }: Props) {
                 aria-current={selected}
               >
                 <span className={`badge ${BADGE_CLASS[run.status]}`}>{run.status}</span>
-                <span className="run-organ">
-                  {run.result?.organDisplayName ?? run.organ}
-                </span>
+                <span className="run-organ">{organName(run)}</span>
                 <span className="run-detail text-muted">
                   {run.result
                     ? `${run.result.volumeMl.toFixed(1)} mL`

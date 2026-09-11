@@ -28,7 +28,10 @@ function failureMessage(job: SegmentationJob): string {
     job.status === "DeadLettered"
       ? " It has been moved to the dead letter queue for inspection."
       : "";
-  return `Segmentation failed${attempts}: ${job.error ?? "unknown error"}.${suffix}`;
+  // Some errors arrive as full sentences ("Segmentation failed.", the worker's
+  // out-of-memory note), so drop their own full stop before adding ours.
+  const error = (job.error ?? "unknown error").replace(/[.\s]+$/, "");
+  return `Segmentation failed${attempts}: ${error}.${suffix}`;
 }
 
 export function ScanDetailPage() {
@@ -287,6 +290,7 @@ export function ScanDetailPage() {
       {runs.length > 1 && (
         <RunHistory
           runs={runs}
+          organs={organs}
           selectedRunId={selectedRun?.id ?? null}
           onSelect={setSelectedRunId}
         />
