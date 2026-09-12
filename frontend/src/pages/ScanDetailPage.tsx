@@ -1,6 +1,7 @@
 import axios from "axios";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { wakeAiService } from "../api/aiService";
 import { apiClient } from "../api/client";
 import type { OrganOption, ScanDetail } from "../api/types";
 import { NiivueViewer } from "../components/NiivueViewer";
@@ -11,6 +12,7 @@ export function ScanDetailPage() {
   const [organs, setOrgans] = useState<OrganOption[]>([]);
   const [selectedOrgan, setSelectedOrgan] = useState("spleen");
   const [loading, setLoading] = useState(true);
+  const [wakingAi, setWakingAi] = useState(false);
   const [segmenting, setSegmenting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,8 +31,41 @@ export function ScanDetailPage() {
   };
 
   useEffect(() => {
+    let abandoned = false;
+
+    // The scan is the API's own to answer, so it loads regardless of what the
+    // AI service is doing.
     setLoading(true);
-    Promise.all([fetchScan(), fetchOrgans()]).finally(() => setLoading(false));
+    fetchScan().finally(() => {
+      if (!abandoned) setLoading(false);
+    });
+
+    // The organ list comes from the AI service by way of the API, which makes
+    // it the first thing a suspended service turns into an error: an empty
+    // dropdown, before the user has clicked anything. Knock from the browser
+    // first - that is the request a sleeping service holds open while it boots.
+    (async () => {
+      setWakingAi(true);
+      const state = await wakeAiService();
+      if (abandoned) return;
+      setWakingAi(false);
+
+      if (state === "unreachable") {
+        setError("The AI service is not responding. Reload the page to try again.");
+        return;
+      }
+
+      try {
+        await fetchOrgans();
+      } catch (err) {
+        console.error(err);
+        setError("Could not load the organ list. Reload the page to try again.");
+      }
+    })();
+
+    return () => {
+      abandoned = true;
+    };
   }, [id]);
 
   const handleSegment = async () => {
@@ -75,7 +110,7 @@ export function ScanDetailPage() {
             style={{ width: "auto" }}
             value={selectedOrgan}
             onChange={(e) => setSelectedOrgan(e.target.value)}
-            disabled={segmenting}
+            disabled={segmenting || wakingAi}
           >
             {organs.map((organ) => (
               <option key={organ.key} value={organ.key}>
@@ -83,11 +118,27 @@ export function ScanDetailPage() {
               </option>
             ))}
           </select>
-          <button className="btn btn-primary" onClick={handleSegment} disabled={segmenting}>
-            {segmenting ? "Running segmentation..." : "Run segmentation"}
+          <button
+            className="btn btn-primary"
+            onClick={handleSegment}
+            disabled={segmenting || wakingAi}
+          >
+            {wakingAi
+              ? "Waking AI service..."
+              : segmenting
+                ? "Running segmentation..."
+                : "Run segmentation"}
           </button>
         </div>
       </div>
+
+      {wakingAi && (
+        <div className="notice">
+          Waking the AI service. Free-tier hosting suspends it after about 15
+          minutes idle, and starting it back up takes around 40 seconds -
+          segmentation is available as soon as it answers.
+        </div>
+      )}
 
       {error && <div className="form-error">{error}</div>}
 

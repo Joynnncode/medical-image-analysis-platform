@@ -109,6 +109,17 @@
   margin-bottom: 1rem;
 }
 
+/* Something the page is waiting on, rather than something that went wrong. */
+.notice {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  border-radius: 8px;
+  background: rgba(34, 211, 238, 0.05);
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+}
+
 .scan-list {
   display: flex;
   flex-direction: column;

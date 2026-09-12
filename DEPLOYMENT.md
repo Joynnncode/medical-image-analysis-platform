@@ -15,17 +15,19 @@ Render hosts all four pieces:
   request after that takes 30s-2min to wake up (the AI service is slower,
   since it has to reload the PyTorch model into memory). After that, it's
   fast until it goes idle again.
-- **The first segmentation after an idle spell fails, and running it again
-  works.** Waking depends on who is asking. A browser hitting a suspended
-  service has its connection held until the service boots — measured at
-  41.4s, answering 200. The API calling the AI service next door gets an
-  immediate error instead, in about 1.5s, so a click that lands on a
-  sleeping AI service comes back as a failed segmentation rather than a slow
-  one. Two attempts to handle this in the API client were reverted (see the
+- **Waking depends on who is asking**, which is why the scan page wakes the
+  AI service itself. A browser hitting a suspended service has its
+  connection held until the service boots — measured at 41.4s, answering
+  200. The API calling the AI service next door gets an immediate error
+  instead, in about 1.5s, so a click that landed on a sleeping AI service
+  used to come back as a failed segmentation rather than a slow one. Two
+  attempts to handle this in the API client were reverted (see the
   `live-sync` branch): waiting only helps if the connection is held open,
-  and internally it is not. To sidestep it, open the AI service's own URL in
-  a browser and let it finish loading before you segment — that request is
-  the kind that gets held, so it wakes the service.
+  and internally it is not. The scan page now calls the AI service's own
+  `/health` from the browser on load — the request that does get held — and
+  keeps segmentation disabled, saying it is waking the service, until that
+  answers. This needs `VITE_AI_SERVICE_URL` on the frontend (step 4);
+  without it the page skips the wake-up and the old failure comes back.
 - No persistent disk on Render's free plan — uploaded scans/masks live on
   the container's disk and are **lost on restart or redeploy**. Fine for a
   personal/demo project; upgrade that one service to a paid plan with a
@@ -108,6 +110,7 @@ your behalf. Everything else below is copy/paste once you're signed in.
   | Key | Value |
   |---|---|
   | `VITE_API_BASE_URL` | `<your API URL from step 3>/api`, e.g. `https://medimg-api.onrender.com/api` |
+  | `VITE_AI_SERVICE_URL` | `<your AI service URL from step 2>`, no trailing slash, e.g. `https://medimg-ai-service.onrender.com` — lets the scan page wake the sleeping AI service from the browser |
 
 - Under **Redirects/Rewrites**, add one rule so React Router works on refresh:
   - Source: `/*`  →  Destination: `/index.html`  →  Action: **Rewrite**
@@ -124,9 +127,9 @@ slash). Saving triggers a redeploy.
 
 Visit your frontend URL, register an account, upload a `.nii.gz` scan, and
 run segmentation. If everything has been idle, expect the site itself to be
-slow to appear, and expect the first segmentation to come back as a failure
-— run it again and it works. Both are the sleep behaviour described at the
-top of this file, not a broken deploy.
+slow to appear, and expect the scan page to spend about 40 seconds waking
+the AI service before segmentation becomes available. Both are the sleep
+behaviour described at the top of this file, not a broken deploy.
 
 ---
 

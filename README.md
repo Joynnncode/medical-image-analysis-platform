@@ -10,12 +10,10 @@ AI segmentation model on them, and viewing the results in the browser.
 **Live demo:** [medimg-fronted.onrender.com](https://medimg-fronted.onrender.com) —
 click "Try it as a guest" to skip registration, then use the "Download a
 sample scan" link on the dashboard if you don't have a `.nii.gz` file handy.
-Free-tier hosting, so the services sleep after ~15 minutes of no traffic.
-Waking them takes 30s–2min, and **the first segmentation after an idle
-spell fails within a couple of seconds** — the API's call to the sleeping AI
-service is refused outright rather than held open while it boots. Click "Run
-segmentation" again and it goes through. That is a free-tier limitation, not
-a broken deploy.
+Free-tier hosting, so the services sleep after ~15 minutes of no traffic and
+waking them takes 30s–2min. The scan page wakes the AI service from the
+browser and says so while it boots, so the first segmentation after an idle
+spell waits rather than failing.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 ![Scan detail with segmentation overlay](docs/screenshots/scan-detail.png)
