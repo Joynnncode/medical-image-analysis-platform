@@ -8,7 +8,10 @@ RUN apt-get update \
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+# Pinned. Unpinned, every rebuild takes the newest wheel, and on Render's 512MB
+# free tier a segmentation runs within a few MB of the limit: 2.14.0 peaks about
+# 9MB higher than 2.13.0 on the same scan.
+RUN pip install --no-cache-dir torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app

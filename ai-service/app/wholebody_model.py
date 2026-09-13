@@ -111,7 +111,7 @@ def run_inference(input_path: str, output_path: str, label_index: int) -> dict:
     data = pre({"image": input_path})
     image = data["image"].unsqueeze(0).to(DEVICE)
 
-    with torch.no_grad():
+    with torch.inference_mode():
         logits = sliding_window_inference(
             inputs=image,
             roi_size=(96, 96, 96),
@@ -121,9 +121,14 @@ def run_inference(input_path: str, output_path: str, label_index: int) -> dict:
             mode="gaussian",
             padding_mode="replicate",
         )
-        probs = torch.softmax(logits, dim=1)
 
-    data["pred"] = probs[0].cpu()
+    # Softmax is monotonic per voxel, so argmax over the logits picks the same
+    # label without a second copy of the network output, which for this model
+    # is 105 channels of the resampled volume. data["image"] stays: Invertd
+    # reads it below.
+    del image
+    data["pred"] = logits[0].cpu()
+    del logits
 
     # Match the bundle's own postprocessing order: argmax to a discrete
     # label map *before* inverting back to original spacing/orientation,

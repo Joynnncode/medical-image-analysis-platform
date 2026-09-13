@@ -117,7 +117,7 @@ def run_inference(input_path: str, output_path: str) -> dict:
     data = pre({"image": input_path})
     image = data["image"].unsqueeze(0).to(DEVICE)
 
-    with torch.no_grad():
+    with torch.inference_mode():
         logits = sliding_window_inference(
             inputs=image,
             roi_size=(96, 96, 96),
@@ -125,9 +125,13 @@ def run_inference(input_path: str, output_path: str) -> dict:
             predictor=net,
             overlap=0.5,
         )
-        probs = torch.softmax(logits, dim=1)
 
-    data["pred"] = probs[0].cpu()
+    # Softmax is monotonic per voxel, so argmax over the logits picks the same
+    # channel without a second copy of the network output. The resampled input
+    # is not read again: the mask is mapped back using the original file.
+    del image, data["image"]
+    data["pred"] = logits[0].cpu()
+    del logits
     data = Compose([AsDiscreted(keys="pred", argmax=True)])(data)
     mask_resampled = np.asarray(data["pred"][0]).astype(np.uint8)
     mask_affine = np.asarray(data["pred"].affine, dtype=np.float64)
