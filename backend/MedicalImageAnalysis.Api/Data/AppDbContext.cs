@@ -17,6 +17,10 @@ public class AppDbContext : DbContext
             .HasIndex(u => u.Email)
             .IsUnique();
 
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.GitHubId)
+            .IsUnique();
+
         modelBuilder.Entity<Scan>()
             .HasOne(s => s.User)
             .WithMany(u => u.Scans)

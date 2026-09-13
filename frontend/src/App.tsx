@@ -4,6 +4,7 @@ import { NavBar } from "./components/NavBar";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./context/AuthContext";
 import { DashboardPage } from "./pages/DashboardPage";
+import { GitHubCallbackPage } from "./pages/GitHubCallbackPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResearchPage } from "./pages/ResearchPage";
@@ -18,6 +19,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/auth/github" element={<GitHubCallbackPage />} />
             <Route
               path="/"
               element={

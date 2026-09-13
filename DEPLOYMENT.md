@@ -95,6 +95,8 @@ your behalf. Everything else below is copy/paste once you're signed in.
   | `AiService__BaseUrl` | the AI service URL from step 2 |
   | `Storage__Root` | `/app/storage` |
   | `Cors__AllowedOrigins__0` | `http://localhost:5173` (placeholder — updated in step 5) |
+  | `GitHub__ClientId` | optional, from step 6. Leave both GitHub keys unset to run without "Continue with GitHub" |
+  | `GitHub__ClientSecret` | optional, from step 6 |
 
 - Create Web Service, wait for the build, then copy its public URL
   (e.g. `https://medimg-api.onrender.com`)
@@ -123,9 +125,29 @@ Go back to the `medimg-api` service → Environment → edit
 `Cors__AllowedOrigins__0` to your real frontend URL from step 4 (no trailing
 slash). Saving triggers a redeploy.
 
-## 6. Try it
+## 6. Sign in with GitHub (optional)
 
-Visit your frontend URL, register an account, upload a `.nii.gz` scan, and
+Without this the login page still offers guest access and email accounts, and
+the GitHub button says it is not set up.
+
+- On GitHub: Settings → Developer settings → OAuth Apps → New OAuth App
+  - Homepage URL: your frontend URL from step 4
+  - Authorization callback URL: your **API** URL from step 3 followed by
+    `/api/auth/github/callback`, e.g.
+    `https://medimg-api.onrender.com/api/auth/github/callback`
+- Register it, then Generate a new client secret
+- Back on `medimg-api` → Environment, set `GitHub__ClientId` and
+  `GitHub__ClientSecret`. Saving redeploys.
+
+Nothing else is needed. After sign-in the API sends the browser back to the
+frontend, and it finds the frontend from `Cors__AllowedOrigins__0`, so step 5
+has to be right for this to land in the right place. The API asks GitHub for
+no scopes: it reads the public profile only, and keys the account on the
+GitHub user id rather than on an email address.
+
+## 7. Try it
+
+Visit your frontend URL, sign in with GitHub (or as a guest), upload a `.nii.gz` scan, and
 run segmentation. If everything has been idle, expect the site itself to be
 slow to appear, and expect the scan page to spend about 40 seconds waking
 the AI service before segmentation becomes available. Both are the sleep

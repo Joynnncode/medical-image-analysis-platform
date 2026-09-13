@@ -152,3 +152,25 @@ h1, h2, h3 {
   background: rgba(248, 113, 113, 0.15);
   color: var(--danger);
 }
+
+.btn-block {
+  width: 100%;
+  text-decoration: none;
+}
+
+/* Between the one-click ways in and the email form. */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}

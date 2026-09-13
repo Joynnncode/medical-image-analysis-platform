@@ -10,6 +10,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   guestLogin: () => Promise<void>;
+  /** Keeps the session the API handed back at the end of a GitHub sign-in. */
+  completeGitHubLogin: (data: AuthResponse) => void;
   logout: () => void;
 }
 
@@ -98,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       guestLogin,
+      completeGitHubLogin: persistSession,
       logout,
     }),
     [email, sessionExpired]

@@ -1,7 +1,9 @@
 using System.Text;
+using MedicalImageAnalysis.Api.Controllers;
 using MedicalImageAnalysis.Api.Data;
 using MedicalImageAnalysis.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -46,7 +48,7 @@ var jwtKey = builder.Configuration["Jwt:Key"]
     ?? throw new InvalidOperationException("Jwt:Key must be configured (see appsettings.json / environment variables).");
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "MedicalImageAnalysis";
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+var authentication = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         // Keep claim types as issued (e.g. "sub") instead of ASP.NET Core's
@@ -64,6 +66,60 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+// GitHub sign-in is optional. Without an OAuth app configured the API runs as
+// before, and the login button's endpoint sends visitors back to say so.
+var gitHubClientId = builder.Configuration["GitHub:ClientId"];
+var gitHubClientSecret = builder.Configuration["GitHub:ClientSecret"];
+if (!string.IsNullOrEmpty(gitHubClientId) && !string.IsNullOrEmpty(gitHubClientSecret))
+{
+    authentication
+        .AddCookie(AuthController.ExternalScheme, options =>
+        {
+            options.Cookie.Name = "medimg.github";
+            options.Cookie.SameSite = SameSiteMode.Lax;
+            options.ExpireTimeSpan = TimeSpan.FromMinutes(5);
+        })
+        .AddGitHub(options =>
+        {
+            options.ClientId = gitHubClientId;
+            options.ClientSecret = gitHubClientSecret;
+            options.SignInScheme = AuthController.ExternalScheme;
+            options.CallbackPath = "/api/auth/github/callback";
+
+            // GitHub comes back to the callback with a top-level GET, which a
+            // Lax cookie survives. The default (None, Always Secure) would be
+            // dropped by anything talking plain HTTP, local runs included.
+            options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+            options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+
+            // Only the tests set these, to point the handshake at a fake GitHub.
+            options.AuthorizationEndpoint = builder.Configuration["GitHub:AuthorizationEndpoint"] ?? options.AuthorizationEndpoint;
+            options.TokenEndpoint = builder.Configuration["GitHub:TokenEndpoint"] ?? options.TokenEndpoint;
+            options.UserInformationEndpoint = builder.Configuration["GitHub:UserInformationEndpoint"] ?? options.UserInformationEndpoint;
+
+            // Declining on GitHub's consent page, or a stale or forged state,
+            // lands here. GitHubComplete finds no sign-in and reports it on
+            // the frontend's login page instead of a raw 500.
+            options.Events.OnRemoteFailure = context =>
+            {
+                context.Response.Redirect("/api/auth/github/complete");
+                context.HandleResponse();
+                return Task.CompletedTask;
+            };
+        });
+}
+
+// Render terminates HTTPS at its proxy and forwards plain HTTP. Without the
+// forwarded scheme the OAuth redirect_uri goes out as http://, which does not
+// match the callback registered with GitHub. The proxy's addresses are not
+// published, so no list of known proxies can be kept.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 builder.Services.AddAuthorization();
 
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
@@ -80,6 +136,8 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 using (var scope = app.Services.CreateScope())
 {
