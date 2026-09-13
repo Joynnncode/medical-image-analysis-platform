@@ -1,0 +1,4 @@
+nibabel==5.3.2
+numpy==1.26.4
+requests==2.32.3
+pytest==8.3.4

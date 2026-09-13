@@ -133,6 +133,27 @@ Useful if Docker isn't set up yet, or for active development.
 
    Open http://localhost:5173.
 
+## Testing
+
+```bash
+./tests/run.sh
+```
+
+Brings up a throwaway Postgres database, a stub AI service and the real API,
+then walks the path a visitor walks: guest login, upload, segment, read the
+numbers, load the mask. About eight seconds. It never touches the dev
+database, and it does not need Docker.
+
+See [tests/README.md](tests/README.md) for what is covered, what is not, and
+why the AI service is stubbed.
+
+Whether the segmentation is any *good* is a separate question, and needs
+labelled scans and the real model: see [evaluation/README.md](evaluation/README.md).
+
+```bash
+./evaluation/run.sh --dataset evaluation/data/Task09_Spleen --organ spleen --label-value 1
+```
+
 ## Project layout
 
 ```
@@ -140,6 +161,8 @@ frontend/               React + Vite + TypeScript SPA
 backend/
   MedicalImageAnalysis.Api/   ASP.NET Core Web API (auth, scans, storage)
 ai-service/             FastAPI + MONAI segmentation service
+tests/                  End-to-end suite (API + stubbed AI service)
+evaluation/             Segmentation quality scoring against ground truth
 docker-compose.yml      Wires all services + Postgres together
 ```
 
